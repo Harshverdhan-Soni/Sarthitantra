@@ -1,0 +1,52 @@
+# ── Personal / sensitive data (never commit) ──────────────────────────────
+profile.md
+profile1.md
+profile_backup.md
+profilelast.md
+profile_section9.md
+profile_section9 (1).md
+CLAUDE.md
+
+# Excel trackers (contain personal application history)
+*.xlsx
+*.xls
+
+# Master resume and tailored output documents
+master/
+jobs/
+
+# JSON queue file (runtime artifact, may contain personal data)
+apply_queue.json
+
+# Compressed archives
+*.tar.gz
+*.zip
+
+# Misc backup/old folders
+updated/
+updated 2/
+
+# ── Generated per-company resume/cover scripts ────────────────────────────
+# These are auto-generated and embed personal resume content
+scripts/*_resume_py.py
+scripts/*_cover_py.py
+scripts/*.js
+scripts/__pycache__/
+scripts/gen_*.py
+
+# ── Node / React build artifacts ──────────────────────────────────────────
+job-pilot/node_modules/
+job-pilot/dist/
+job-pilot/vite.config.js.timestamp-*
+job-pilot/vite.config.js.bak
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# ── OS artifacts ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

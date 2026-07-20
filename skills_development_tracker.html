@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobFinder — Skills Development Tracker</title>
+<style>
+  :root {
+    --blue: #1f4e79; --blue-light: #eaf1f8; --green: #16a766; --green-bg: #e7f7ee;
+    --yellow: #b8860b; --yellow-bg: #fff8e6; --gray: #595959; --border: #e2e2e2;
+    --bg: #f7f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: var(--bg); color: #1a1a1a; margin: 0; padding: 0 0 60px 0;
+  }
+  header {
+    background: var(--blue); color: white; padding: 24px 32px;
+  }
+  header h1 { margin: 0 0 4px 0; font-size: 22px; }
+  header p { margin: 0; opacity: 0.9; font-size: 13.5px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px; }
+  .panel {
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  .summary-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+  .stat { flex: 1; min-width: 140px; text-align: center; padding: 10px; }
+  .stat .num { font-size: 26px; font-weight: 700; color: var(--blue); }
+  .stat .label { font-size: 12px; color: var(--gray); }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button.btn {
+    background: var(--blue); color: white; border: none; border-radius: 6px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.btn.secondary { background: white; color: var(--blue); border: 1px solid var(--blue); }
+  button.btn:hover { opacity: 0.88; }
+  input[type=file] { display: none; }
+  .instructions { font-size: 13px; color: var(--gray); line-height: 1.5; margin-top: 10px; }
+  .job-card {
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 14px;
+  }
+  .job-card.ready { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+  .job-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .job-title { font-size: 15.5px; font-weight: 700; }
+  .job-company { color: var(--gray); font-size: 13px; }
+  .badge {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+    white-space: nowrap; height: fit-content;
+  }
+  .badge.ready { background: var(--green-bg); color: var(--green); }
+  .badge.progress { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.score { background: var(--blue-light); color: var(--blue); margin-left: 6px; }
+  .job-links { font-size: 12.5px; margin: 6px 0 10px 0; }
+  .job-links a { color: var(--blue); text-decoration: none; margin-right: 14px; }
+  .job-links a:hover { text-decoration: underline; }
+  .progress-bar-outer {
+    background: #eee; border-radius: 5px; height: 6px; margin: 8px 0 12px 0; overflow: hidden;
+  }
+  .progress-bar-inner { background: var(--green); height: 100%; transition: width 0.2s; }
+  .skill-row {
+    display: flex; align-items: flex-start; gap: 10px; padding: 8px 0;
+    border-top: 1px solid #f0f0f0;
+  }
+  .skill-row:first-of-type { border-top: none; }
+  .skill-row input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0; }
+  .skill-body { flex: 1; }
+  .skill-title { font-size: 13.5px; font-weight: 600; }
+  .skill-title.done { text-decoration: line-through; color: var(--gray); }
+  .skill-why { font-size: 12.5px; color: var(--gray); margin: 2px 0 4px 0; line-height: 1.4; }
+  .skill-meta { font-size: 11.5px; color: #888; margin-bottom: 4px; }
+  .skill-resources a {
+    font-size: 12px; color: var(--blue); text-decoration: none; margin-right: 12px;
+  }
+  .skill-resources a:hover { text-decoration: underline; }
+  .footer-note { font-size: 12px; color: var(--gray); text-align: center; margin-top: 30px; }
+  .status-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; color: #555; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JobFinder — Skills Development Tracker</h1>
+  <p>Generated 2026-07-08 from applications_tracker_NEW.xlsx. Check off a skill once you've genuinely
+     developed/refreshed it — it applies everywhere that skill is needed. When a job turns green
+     ("Ready to apply"), tell Claude the Job ID and it will proceed with the pre-fill → your final
+     approval → submit workflow.</p>
+</header>
+
+<div class="wrap">
+
+  <div class="panel">
+    <div class="summary-row">
+      <div class="stat"><div class="num" id="stat-skills-done">0/0</div><div class="label">Skills checked off</div></div>
+      <div class="stat"><div class="num" id="stat-jobs-ready">0</div><div class="label">Jobs ready to apply</div></div>
+      <div class="stat"><div class="num" id="stat-jobs-total">0</div><div class="label">Active jobs tracked</div></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="export-btn">Export progress (.json)</button>
+      <button class="btn secondary" id="import-btn">Import progress</button>
+      <input type="file" id="import-file" accept="application/json">
+      <button class="btn secondary" id="expand-all-btn">Expand all</button>
+      <button class="btn secondary" id="collapse-all-btn">Collapse all</button>
+    </div>
+    <div class="instructions">
+      Progress auto-saves to this browser (localStorage) every time you check a box. Use
+      <b>Export</b> before switching browsers or computers, and <b>Import</b> to restore it. This page
+      is read-only otherwise — it doesn't write back to the tracker or submit anything by itself.
+      <br><br>
+      <b>Linked to the master tracker:</b> open
+      <a href="applications_tracker_NEW.xlsx" target="_blank">applications_tracker_NEW.xlsx</a> to see
+      every job's full record (each row deep-links back here via its Job ID). To sync your
+      readiness progress into that tracker's "Skill-Ready?" column: click <b>Export progress</b>
+      above, save the file as <code>skills_progress_export.json</code> directly in the JobFinder
+      folder (overwriting any older copy), then ask Claude to run
+      <code>scripts/sync_skill_readiness.py</code>.
+    </div>
+  </div>
+
+  <div id="job-list"></div>
+
+  <div class="footer-note">
+    Re-run <code>scripts/generate_skills_tracker.py</code> after future sourcing runs to refresh this
+    list with new jobs — your exported progress file can be re-imported afterward.
+  </div>
+
+</div>
+
+<script>
+const DATA = {"generated": "2026-07-08", "jobs": [{"id": "JOB-036", "company": "PlexTrac", "role": "AI Research Engineer - Applied AI", "score": 88, "status": "Tailored", "url": "https://himalayas.app/companies/plextrac/jobs/ai-research-engineer-applied-ai", "resume": "jobs/PlexTrac_AIResearchEngineerAppliedAI/PlexTrac_AIResearchEngineerAppliedAI_resume.docx", "cover": "jobs/PlexTrac_AIResearchEngineerAppliedAI/PlexTrac_AIResearchEngineerAppliedAI_cover.docx", "skills": ["security_data"]}, {"id": "JOB-026", "company": "Nagarro", "role": "Principal Engineer, Machine Learning", "score": 87, "status": "Tailored", "url": "https://himalayas.app/companies/nagarro/jobs/principal-engineer-machine-learning", "resume": "jobs/Nagarro_PrincipalEngineerMachineLearning/Nagarro_PrincipalEngineerMachineLearning_resume.docx", "cover": "jobs/Nagarro_PrincipalEngineerMachineLearning/Nagarro_PrincipalEngineerMachineLearning_cover.docx", "skills": ["jax_rl", "gan_vae", "mlops_platforms"]}, {"id": "JOB-014", "company": "BuzzBoard", "role": "Team Lead / Senior Specialist \u2014 AI", "score": 85, "status": "Tailored", "url": "https://himalayas.app/companies/buzzboard-com/jobs/team-lead-senior-specialist-ai", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-016", "company": "NorthBay Solutions", "role": "Generative AI Lead \u2014 Agentic AI", "score": 85, "status": "Tailored", "url": "https://himalayas.app/companies/northbay-solutions/jobs/generative-ai-lead-agentic-ai", "resume": "jobs/NorthBay_GenerativeAILead-AgenticAI/NorthBay_GenerativeAILead-AgenticAI_resume.docx", "cover": "jobs/NorthBay_GenerativeAILead-AgenticAI/NorthBay_GenerativeAILead-AgenticAI_cover.docx", "skills": ["orchestration_frameworks"]}, {"id": "JOB-022", "company": "Nagarro", "role": "Associate Staff Engineer, Generative AI", "score": 85, "status": "Tailored", "url": "https://himalayas.app/companies/nagarro/jobs/associate-staff-engineer-generative-ai", "resume": "jobs/Nagarro_AssociateStaffEngineer-GenerativeAI/Nagarro_AssociateStaffEngineer-GenerativeAI_resume.docx", "cover": "jobs/Nagarro_AssociateStaffEngineer-GenerativeAI/Nagarro_AssociateStaffEngineer-GenerativeAI_cover.docx", "skills": ["review_jd"]}, {"id": "JOB-027", "company": "Nagarro", "role": "Associate Principal Engineer, Machine Learning", "score": 84, "status": "Scored", "url": "https://himalayas.app/companies/nagarro/jobs/associate-principal-engineer-machine-learning", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-032", "company": "Bridge-it", "role": "Fractional AI Architect (Consultant)", "score": 84, "status": "Tailored", "url": "https://himalayas.app/companies/bridge-it/jobs/fractional-ai-architect-consultant", "resume": "jobs/Bridge-it_FractionalAIArchitect-Consultant/Bridge-it_FractionalAIArchitect-Consultant_resume.docx", "cover": "jobs/Bridge-it_FractionalAIArchitect-Consultant/Bridge-it_FractionalAIArchitect-Consultant_cover.docx", "skills": ["azure_ai", "aws_cloud", "review_jd"]}, {"id": "JOB-037", "company": "Xenon7", "role": "Senior AI/ML Engineer-Remote", "score": 84, "status": "Tailored", "url": "https://himalayas.app/companies/xenon7/jobs/senior-ai-ml-engineer-remote", "resume": "jobs/Xenon7_SeniorAIMLEngineerRemote/Xenon7_SeniorAIMLEngineerRemote_resume.docx", "cover": "jobs/Xenon7_SeniorAIMLEngineerRemote/Xenon7_SeniorAIMLEngineerRemote_cover.docx", "skills": ["azure_ai", "aws_cloud"]}, {"id": "JOB-025", "company": "Cotiviti", "role": "Principal AI Engineer", "score": 83, "status": "Tailored", "url": "https://himalayas.app/companies/cotiviti/jobs/principal-ai-engineer", "resume": "jobs/Cotiviti_PrincipalAIEngineer/Cotiviti_PrincipalAIEngineer_resume.docx", "cover": "jobs/Cotiviti_PrincipalAIEngineer/Cotiviti_PrincipalAIEngineer_cover.docx", "skills": ["fintech_domain"]}, {"id": "JOB-009", "company": "Particle41", "role": "AI Engineer", "score": 82, "status": "Tailored", "url": "https://job-boards.greenhouse.io/particle41llc/jobs/4973733008", "resume": "jobs/Particle41_AIEngineer-RAGAgentic/Particle41_AIEngineer-RAGAgentic_resume.docx", "cover": "jobs/Particle41_AIEngineer-RAGAgentic/Particle41_AIEngineer-RAGAgentic_cover.docx", "skills": ["review_jd"]}, {"id": "JOB-028", "company": "AHEAD", "role": "Senior Technical Consultant - Data and AI", "score": 82, "status": "Tailored", "url": "https://himalayas.app/companies/ahead/jobs/senior-technical-consultant-data-and-ai", "resume": "jobs/AHEAD_SeniorTechnicalConsultant-DataAI/AHEAD_SeniorTechnicalConsultant-DataAI_resume.docx", "cover": "jobs/AHEAD_SeniorTechnicalConsultant-DataAI/AHEAD_SeniorTechnicalConsultant-DataAI_cover.docx", "skills": ["azure_ai", "aws_cloud"]}, {"id": "JOB-041", "company": "Sia Partners", "role": "Staff GenAI Engineer", "score": 82, "status": "Tailored", "url": "https://himalayas.app/companies/sia-partners/jobs/staff-genai-engineer", "resume": "jobs/SiaPartners_StaffGenAIEngineer/SiaPartners_StaffGenAIEngineer_resume.docx", "cover": "jobs/SiaPartners_StaffGenAIEngineer/SiaPartners_StaffGenAIEngineer_cover.docx", "skills": ["terraform_iac"]}, {"id": "JOB-021", "company": "SS&C Technologies", "role": "GenAI Developer / Engineer", "score": 80, "status": "Scored", "url": "https://himalayas.app/companies/ss-c-technologies/jobs/genai-developer-engineer-2874542653", "resume": null, "cover": null, "skills": ["azure_ai", "vector_db_alt"]}, {"id": "JOB-033", "company": "Wadhwani AI", "role": "Machine Learning Scientist (LLM)", "score": 80, "status": "Tailored", "url": "https://himalayas.app/companies/wadhwani-ai/jobs/machine-learning-scientist-llm-5076052172", "resume": "jobs/WadhwaniAI_MachineLearningScientist-LLM/WadhwaniAI_MachineLearningScientist-LLM_resume.docx", "cover": "jobs/WadhwaniAI_MachineLearningScientist-LLM/WadhwaniAI_MachineLearningScientist-LLM_cover.docx", "skills": ["asr_speech"]}, {"id": "JOB-038", "company": "Luma Financial Technologies", "role": "AI/ML Engineer", "score": 80, "status": "Scored", "url": "https://himalayas.app/companies/luma-financial-technologies/jobs/ai-ml-engineer-8098212452", "resume": null, "cover": null, "skills": ["fintech_domain"]}, {"id": "JOB-002", "company": "Featherless AI", "role": "AI Researcher - Multilingual Data", "score": 78, "status": "Tailored", "url": "https://jobs.ashbyhq.com/featherlessai/ee1a374f-2a11-4908-8eaa-80ccf0e4942d", "resume": "jobs/FeatherlessAI_AIResearcher-MultilingualData/FeatherlessAI_AIResearcher-MultilingualData_resume.docx", "cover": "jobs/FeatherlessAI_AIResearcher-MultilingualData/FeatherlessAI_AIResearcher-MultilingualData_cover.docx", "skills": ["top_tier_pubs"]}, {"id": "JOB-013", "company": "BreachLock", "role": "AI Developer \u2014 Generative AI & LLM Systems", "score": 78, "status": "Tailored", "url": "https://himalayas.app/companies/breachlock/jobs/ai-developer-generative-ai-llm-systems", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-015", "company": "InnovationTeam", "role": "Sr. Generative AI Engineer", "score": 76, "status": "Scored", "url": "https://himalayas.app/companies/innovationteam/jobs/sr-generative-ai-engineer", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-042", "company": "HighLevel", "role": "Software Development Engineer III - Gen AI (Workflow AI/RAG)", "score": 76, "status": "Tailored", "url": "https://himalayas.app/companies/highlevel/jobs/software-development-engineer-iii-gen-ai-7901534214", "resume": "jobs/HighLevel_SDE3-GenAI-WorkflowRAG/HighLevel_SDE3-GenAI-WorkflowRAG_resume.docx", "cover": "jobs/HighLevel_SDE3-GenAI-WorkflowRAG/HighLevel_SDE3-GenAI-WorkflowRAG_cover.docx", "skills": ["extreme_scale_systems"]}, {"id": "JOB-017", "company": "NorthBay Solutions", "role": "Azure AI (Agentic) Specialist \u2014 Team Lead", "score": 75, "status": "Tailored", "url": "https://himalayas.app/companies/northbay-solutions/jobs/azure-ai-agentic-specialist-team-lead", "resume": "jobs/NorthBay_AzureAIAgenticSpecialist-TeamLead/NorthBay_AzureAIAgenticSpecialist-TeamLead_resume.docx", "cover": "jobs/NorthBay_AzureAIAgenticSpecialist-TeamLead/NorthBay_AzureAIAgenticSpecialist-TeamLead_cover.docx", "skills": ["azure_ai"]}, {"id": "JOB-010", "company": "Ema Unlimited", "role": "Principal Machine Learning Engineer", "score": 74, "status": "Tailored", "url": "https://jobs.ashbyhq.com/ema/8268af44-d5d8-4a29-9638-3ea30f35f3a9", "resume": "jobs/Ema_PrincipalMLEngineer-AgenticAI/Ema_PrincipalMLEngineer-AgenticAI_resume.docx", "cover": "jobs/Ema_PrincipalMLEngineer-AgenticAI/Ema_PrincipalMLEngineer-AgenticAI_cover.docx", "skills": ["review_jd"]}, {"id": "JOB-003", "company": "Tether", "role": "AI Research Engineer - Agentic Post-training", "score": 73, "status": "Tailored", "url": "https://tether.recruitee.com/o/ai-research-engineer-agentic-post-training-100-remote-worldwide", "resume": "jobs/Tether_AIResearchEngineer-AgenticPostTraining/Tether_AIResearchEngineer-AgenticPostTraining_resume.docx", "cover": "jobs/Tether_AIResearchEngineer-AgenticPostTraining/Tether_AIResearchEngineer-AgenticPostTraining_cover.docx", "skills": ["top_tier_pubs", "fintech_domain", "distributed_training"]}, {"id": "JOB-001", "company": "Built In", "role": "Applied AI Engineer (Agentic Systems & Reputation Intelligence)", "score": 72, "status": "Scored", "url": "https://job-boards.greenhouse.io/builtin/jobs/7855050", "resume": null, "cover": null, "skills": ["csharp_dotnet"]}, {"id": "JOB-006", "company": "AlphaSense India", "role": "Senior Staff Engineer, AI", "score": 72, "status": "Scored", "url": "https://job-boards.greenhouse.io/alphasenseindia/jobs/8429044002", "resume": null, "cover": null, "skills": ["computer_vision"]}, {"id": "JOB-011", "company": "CrowdStrike", "role": "Sr. AI Engineer", "score": 72, "status": "Scored", "url": "https://himalayas.app/companies/crowdstrike/jobs/sr-ai-engineer", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-024", "company": "Pythian", "role": "Senior AI / ML Engineer", "score": 70, "status": "Scored", "url": "https://himalayas.app/companies/pythian/jobs/senior-ai-ml-engineer", "resume": null, "cover": null, "skills": ["azure_ai", "aws_cloud"]}, {"id": "JOB-031", "company": "Proximity Works", "role": "GenAI - Data Scientist (Search, Discovery)", "score": 70, "status": "Scored", "url": "https://himalayas.app/companies/proximity-works/jobs/genai-data-scientist-search-discovery", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-012", "company": "Mactores", "role": "Generative AI Engineer", "score": 68, "status": "Scored", "url": "https://himalayas.app/companies/mactores/jobs/generative-ai-engineer", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-029", "company": "Fusemachines", "role": "Machine Learning Engineer / Data Scientist", "score": 66, "status": "Scored", "url": "https://himalayas.app/companies/fusemachines/jobs/machine-learning-engineer-data-scientist-3554750670", "resume": null, "cover": null, "skills": ["classical_ml"]}, {"id": "JOB-020", "company": "ONE (OnePay)", "role": "Senior Applied Scientist", "score": 65, "status": "Scored", "url": "https://himalayas.app/companies/onepay/jobs/senior-applied-scientist", "resume": null, "cover": null, "skills": ["fintech_domain", "databricks"]}, {"id": "JOB-034", "company": "PradeepIT Consulting Services Pvt Ltd", "role": "Tech Lead - Gen AI (6+ Years)", "score": 64, "status": "Scored", "url": "https://himalayas.app/companies/pradeepit-consulting-services-pvt-ltd/jobs/tech-lead-gen-ai-with-6-years-1590182615", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-007", "company": "Postman", "role": "Senior Applied AI Engineer", "score": 63, "status": "Scored", "url": "https://job-boards.greenhouse.io/postman/jobs/7680085003", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-008", "company": "Google DeepMind", "role": "Research Scientist, AQUA", "score": 60, "status": "Scored", "url": "https://job-boards.greenhouse.io/deepmind/jobs/7640947", "resume": null, "cover": null, "skills": ["top_tier_pubs", "jax_rl"]}, {"id": "JOB-018", "company": "Featherless AI", "role": "AI Researcher \u2014 Distillation", "score": 60, "status": "Scored", "url": "https://himalayas.app/companies/featherless-ai/jobs/ai-researcher-distillation", "resume": null, "cover": null, "skills": ["distributed_training", "distillation"]}, {"id": "JOB-030", "company": "Sabre Corporation", "role": "Principal Data Science Engineer", "score": 60, "status": "Scored", "url": "https://himalayas.app/companies/sabre-corporation/jobs/principal-data-science-engineer", "resume": null, "cover": null, "skills": ["terraform_iac", "classical_ml"]}, {"id": "JOB-019", "company": "Wadhwani AI", "role": "Machine Learning Scientist (ASR)", "score": 58, "status": "Scored", "url": "https://himalayas.app/companies/wadhwani-ai/jobs/machine-learning-scientist-asr", "resume": null, "cover": null, "skills": ["asr_speech"]}, {"id": "JOB-023", "company": "Uvation", "role": "AI/ML Engineer", "score": 58, "status": "Scored", "url": "https://himalayas.app/companies/uvation/jobs/ai-ml-engineer", "resume": null, "cover": null, "skills": ["computer_vision", "mlops_platforms"]}, {"id": "JOB-035", "company": "Zensar", "role": "AES - DE - Generative AI Application Developers", "score": 58, "status": "Scored", "url": "https://himalayas.app/companies/zensar/jobs/aes-de-generative-ai-application-developers", "resume": null, "cover": null, "skills": ["review_jd"]}, {"id": "JOB-039", "company": "Sun King", "role": "Machine Learning Engineer", "score": 55, "status": "Scored", "url": "https://himalayas.app/companies/sun-king/jobs/machine-learning-engineer", "resume": null, "cover": null, "skills": ["asr_speech", "computer_vision"]}, {"id": "JOB-040", "company": "Hypersonix", "role": "Data Scientist_ML (India)", "score": 42, "status": "Scored", "url": "https://himalayas.app/companies/hypersonix/jobs/data-scientist_ml-india", "resume": null, "cover": null, "skills": ["classical_ml"]}, {"id": "JOB-043", "company": "Nucs AI", "role": "Machine Learning Scientist (Clinical Oncology)", "score": 38, "status": "Scored", "url": "https://himalayas.app/companies/nucs-ai/jobs/machine-learning-scientist", "resume": null, "cover": null, "skills": ["computer_vision", "clinical_imaging"]}], "skills": {"asr_speech": {"title": "Speech / ASR (Whisper, Wav2Vec, ESPnet)", "why": "Wadhwani AI (ASR) and Sun King both need production speech-model experience, which is not currently in your project history.", "time": "2-3 weeks (this is a real specialization, not a quick add-on)", "resources": [{"label": "Hugging Face Audio Course", "url": "https://huggingface.co/learn/audio-course"}, {"label": "OpenAI Whisper (GitHub)", "url": "https://github.com/openai/whisper"}]}, "aws_cloud": {"title": "AWS AI stack (SageMaker, Bedrock)", "why": "AHEAD, Sia Partners, and Xenon7 all expect hands-on AWS ownership (SageMaker/Bedrock) for production AI systems.", "time": "1 week (fundamentals) + hands-on lab", "resources": [{"label": "AWS SageMaker \u2014 Getting Started", "url": "https://aws.amazon.com/sagemaker/getting-started/"}, {"label": "Amazon Bedrock documentation", "url": "https://docs.aws.amazon.com/bedrock/"}]}, "azure_ai": {"title": "Azure AI stack (Azure OpenAI, AI Search, Prompt Flow)", "why": "NorthBay (Azure AI Specialist) and Xenon7 list Azure as the core cloud platform; your production experience is on-premise/Docker-Kubernetes instead.", "time": "1 week (fundamentals) + hands-on lab", "resources": [{"label": "Microsoft Learn \u2014 AI on Azure learning path", "url": "https://learn.microsoft.com/en-us/training/paths/get-started-with-artificial-intelligence-on-azure/"}, {"label": "Azure AI Search documentation", "url": "https://learn.microsoft.com/en-us/azure/search/"}]}, "classical_ml": {"title": "Classical ML (regression, clustering, time-series)", "why": "Uvation and Fusemachines lean on classical ML/statistical modeling more than GenAI.", "time": "1-2 weeks (refresher)", "resources": [{"label": "Coursera \u2014 Machine Learning Specialization (Andrew Ng)", "url": "https://www.coursera.org/specializations/machine-learning-introduction"}]}, "clinical_imaging": {"title": "Clinical imaging research (PET/CT, MRI, nuclear medicine)", "why": "Nucs AI requires a PhD specifically in medical-imaging research with publications in clinical-imaging venues. This is a multi-year specialization, not a course you can add quickly \u2014 flagging honestly rather than suggesting a shortcut. Only pursue this if you're genuinely interested in pivoting your PhD focus; otherwise treat JOB-043 as a long shot regardless of skill-building.", "time": "Not realistically closeable short-term", "resources": [{"label": "(No shortcut resource \u2014 this needs a genuine research-focus pivot)", "url": "https://www.nucs.ai/"}]}, "computer_vision": {"title": "Computer vision (detection/segmentation, YOLO)", "why": "Sun King's role pairs speech work with production CV (YOLO, detection/segmentation).", "time": "2-3 weeks", "resources": [{"label": "Hugging Face Computer Vision Course", "url": "https://huggingface.co/learn/computer-vision-course"}]}, "csharp_dotnet": {"title": "C# / .NET", "why": "Built In's role has a C#/.NET component alongside the agentic-AI work.", "time": "1 week (fundamentals, if coming from Java background)", "resources": [{"label": "Microsoft Learn \u2014 C# first steps", "url": "https://learn.microsoft.com/en-us/training/paths/csharp-first-steps/"}]}, "databricks": {"title": "Databricks", "why": "ONE (OnePay) names Databricks as part of its data/ML stack.", "time": "2-3 days", "resources": [{"label": "Databricks Academy (free courses)", "url": "https://www.databricks.com/learn/training/home"}]}, "distillation": {"title": "Model distillation & compression (teacher-student pipelines)", "why": "Featherless AI's distillation role is a specialised research area not covered by your current RAG/agentic-AI project history.", "time": "1-2 weeks", "resources": [{"label": "\"Distilling the Knowledge in a Neural Network\" (Hinton et al., foundational paper)", "url": "https://arxiv.org/abs/1503.02531"}]}, "distributed_training": {"title": "Distributed training (FSDP, DeepSpeed, Accelerate)", "why": "Research-heavy roles (Tether, Featherless AI distillation role) expect multi-GPU training experience beyond single-node fine-tuning.", "time": "1-2 weeks", "resources": [{"label": "PyTorch FSDP tutorial", "url": "https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html"}, {"label": "DeepSpeed \u2014 Getting Started", "url": "https://www.deepspeed.ai/getting-started/"}, {"label": "Hugging Face Accelerate docs", "url": "https://huggingface.co/docs/accelerate/en/index"}]}, "extreme_scale_systems": {"title": "Extreme-scale/low-latency system design", "why": "HighLevel's JD operates at billions of API hits/day across 250+ microservices \u2014 a different scale tier from national-government-scale delivery.", "time": "1-2 weeks reading + case studies", "resources": [{"label": "System Design Primer (GitHub)", "url": "https://github.com/donnemartin/system-design-primer"}]}, "fintech_domain": {"title": "Fintech domain literacy (fraud, payments, claims)", "why": "OnePay, Luma Financial, and Cotiviti all sit in fintech/payments/claims \u2014 a domain step away from your healthcare/e-governance background.", "time": "1 week (self-study, domain vocabulary + case studies)", "resources": [{"label": "Coursera (Univ. of Michigan) \u2014 Fintech: Foundations & Applications", "url": "https://www.coursera.org/learn/fintech-foundations"}]}, "gan_vae": {"title": "GANs & VAEs (generative modeling beyond LLMs)", "why": "Nagarro's Principal ML role lists GAN/VAE as a nice-to-have alongside RAG.", "time": "2 weeks", "resources": [{"label": "DeepLearning.AI \u2014 GANs Specialization", "url": "https://www.deeplearning.ai/courses/generative-adversarial-networks-gans-specialization/"}]}, "jax_rl": {"title": "JAX & reinforcement learning", "why": "Google DeepMind's AQUA role is RL/JAX-first \u2014 a deep specialization gap from your GenAI/RAG background.", "time": "3-4 weeks (substantial)", "resources": [{"label": "JAX documentation", "url": "https://jax.readthedocs.io/"}, {"label": "Hugging Face Deep RL Course", "url": "https://huggingface.co/learn/deep-rl-course"}]}, "mlops_platforms": {"title": "MLOps platforms (MLflow, Kubeflow)", "why": "Several ML-engineering JDs (Nagarro, Uvation) name MLflow/Kubeflow specifically; you have Docker/Kubernetes but not these ML-specific orchestration layers.", "time": "3-5 days", "resources": [{"label": "MLflow documentation", "url": "https://mlflow.org/docs/latest/index.html"}, {"label": "Kubeflow documentation", "url": "https://www.kubeflow.org/docs/"}]}, "orchestration_frameworks": {"title": "Agent-orchestration frameworks (AutoGPT, Semantic Kernel)", "why": "NorthBay's Generative AI Lead role names these by name alongside LangChain/CrewAI, which your SAHAYAK-AI architecture already covers conceptually.", "time": "2-3 days (framework-specific syntax, concepts already known)", "resources": [{"label": "Microsoft Semantic Kernel docs", "url": "https://learn.microsoft.com/en-us/semantic-kernel/overview/"}, {"label": "AutoGPT (GitHub)", "url": "https://github.com/Significant-Gravitas/AutoGPT"}]}, "review_jd": {"title": "Re-read the full live JD & tune resume emphasis", "why": "No specific hard skill gap was flagged during scoring for this role beyond fit/seniority considerations \u2014 the main lever here is making sure the tailored resume's emphasis still matches the live posting before you apply.", "time": "15-20 minutes", "resources": []}, "security_data": {"title": "Security telemetry (SIEM, network/endpoint logs)", "why": "PlexTrac's product is cybersecurity-specific; you have zero direct experience with SIEM/network-telemetry data per profile.md.", "time": "3-5 days (conceptual familiarity, enough to speak to it in an interview)", "resources": [{"label": "MITRE ATT&CK framework overview (widely used SIEM/detection reference)", "url": "https://attack.mitre.org/"}]}, "terraform_iac": {"title": "Infrastructure-as-Code (Terraform)", "why": "Sia Partners leans on Terraform/IaC for cloud-native microservices ownership.", "time": "3-5 days", "resources": [{"label": "Terraform \u2014 Get Started tutorials", "url": "https://developer.hashicorp.com/terraform/tutorials"}]}, "top_tier_pubs": {"title": "Top-tier publication venues (NeurIPS/ICML/ICLR/ACL/EMNLP)", "why": "Featherless AI and Tether expect these venues specifically; GCON 2026 (IEEE) is a respected but different tier. Strategy: submit a workshop paper or strong arXiv preprint of GCP-GraphRAG follow-up work to build toward this.", "time": "Ongoing \u2014 plan around your next paper cycle", "resources": [{"label": "ACL Anthology (browse target venues/CFPs)", "url": "https://aclanthology.org/"}, {"label": "NeurIPS conference site", "url": "https://nips.cc/"}]}, "vector_db_alt": {"title": "Alternate vector databases (Pinecone, Weaviate, Faiss)", "why": "Your RAG work is Neo4j-based; SS&C and similar JDs specifically name Pinecone/Weaviate/Faiss.", "time": "2-3 days", "resources": [{"label": "Pinecone Learning Center", "url": "https://www.pinecone.io/learn/"}, {"label": "Weaviate Academy", "url": "https://weaviate.io/developers/academy"}]}}};
+const STORAGE_KEY = "jobfinder_skills_progress_v1";
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveState(state) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+let state = loadState();
+
+function isChecked(skillId) { return !!state[skillId]; }
+
+function jobProgress(job) {
+  const total = job.skills.length;
+  const done = job.skills.filter(isChecked).length;
+  return { total, done, ready: total > 0 && done === total };
+}
+
+function render() {
+  const list = document.getElementById("job-list");
+  list.innerHTML = "";
+
+  let readyCount = 0;
+  const allSkillIds = Object.keys(DATA.skills);
+  const doneSkillCount = allSkillIds.filter(isChecked).length;
+
+  DATA.jobs.forEach(job => {
+    const prog = jobProgress(job);
+    if (prog.ready) readyCount++;
+
+    const card = document.createElement("div");
+    card.id = job.id;
+    card.className = "job-card" + (prog.ready ? " ready" : "");
+
+    const pct = prog.total ? Math.round((prog.done / prog.total) * 100) : 100;
+
+    let linksHtml = `<a href="${job.url}" target="_blank" rel="noopener">Job posting ↗</a>`;
+    if (job.resume) linksHtml += `<a href="${job.resume}" target="_blank">Tailored resume ↗</a>`;
+    if (job.cover) linksHtml += `<a href="${job.cover}" target="_blank">Cover letter ↗</a>`;
+
+    const skillsHtml = job.skills.map(sid => {
+      const s = DATA.skills[sid];
+      const checked = isChecked(sid) ? "checked" : "";
+      const doneClass = isChecked(sid) ? "done" : "";
+      const resourcesHtml = (s.resources || []).map(r =>
+        `<a href="${r.url}" target="_blank" rel="noopener">${r.label} ↗</a>`
+      ).join("");
+      return `
+        <div class="skill-row">
+          <input type="checkbox" data-skill="${sid}" ${checked}>
+          <div class="skill-body">
+            <div class="skill-title ${doneClass}">${s.title}</div>
+            <div class="skill-why">${s.why}</div>
+            <div class="skill-meta">Est. time: ${s.time}</div>
+            <div class="skill-resources">${resourcesHtml}</div>
+          </div>
+        </div>`;
+    }).join("");
+
+    card.innerHTML = `
+      <div class="job-head">
+        <div>
+          <div class="job-title">${job.id} — ${job.role}</div>
+          <div class="job-company">${job.company}
+            <span class="status-tag">${job.status}</span>
+          </div>
+        </div>
+        <div>
+          ${job.score != null ? `<span class="badge score">Fit score ${job.score}</span>` : ''}
+          ${prog.ready
+            ? '<span class="badge ready">✓ Ready to apply</span>'
+            : `<span class="badge progress">${prog.done}/${prog.total} skills</span>`}
+        </div>
+      </div>
+      <div class="job-links">${linksHtml}</div>
+      <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:${pct}%"></div></div>
+      <div class="skills-container">${skillsHtml}</div>
+    `;
+    list.appendChild(card);
+  });
+
+  document.getElementById("stat-skills-done").textContent = `${doneSkillCount}/${allSkillIds.length}`;
+  document.getElementById("stat-jobs-ready").textContent = readyCount;
+  document.getElementById("stat-jobs-total").textContent = DATA.jobs.length;
+
+  document.querySelectorAll('input[type=checkbox][data-skill]').forEach(cb => {
+    cb.addEventListener("change", (e) => {
+      const sid = e.target.getAttribute("data-skill");
+      state[sid] = e.target.checked;
+      saveState(state);
+      render();
+    });
+  });
+}
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "skills_progress_export.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("import-btn").addEventListener("click", () => {
+  document.getElementById("import-file").click();
+});
+document.getElementById("import-file").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    try {
+      const imported = JSON.parse(evt.target.result);
+      state = Object.assign({}, state, imported);
+      saveState(state);
+      render();
+    } catch (err) {
+      alert("Could not read that file as valid progress JSON.");
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("expand-all-btn").addEventListener("click", () => {
+  document.querySelectorAll(".skills-container").forEach(el => el.style.display = "block");
+});
+document.getElementById("collapse-all-btn").addEventListener("click", () => {
+  document.querySelectorAll(".skills-container").forEach(el => el.style.display = "block");
+});
+
+render();
+</script>
+
+</body>
+</html>

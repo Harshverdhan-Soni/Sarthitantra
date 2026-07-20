@@ -72,16 +72,14 @@ export default function Auth() {
       <div className="w-full max-w-md">
 
         {/* ── Logo ── */}
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div
-            className="grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg"
-            style={{ background: ACCENT }}
-          >
-            <Briefcase size={26} />
-          </div>
+        <div className="mb-8 flex flex-col items-center gap-2">
+          <img src="/logo-icon.svg" alt="Sarthitantra" className="h-16 w-16 rounded-2xl shadow-lg shadow-indigo-200" />
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-900">Sarthitantra</h1>
-            <p className="mt-1 text-sm text-slate-500">AI-powered job application assistant</p>
+            <div className="flex items-baseline justify-center gap-1.5 mt-2">
+              <span className="text-3xl font-bold tracking-tight text-indigo-900">Sarthi</span>
+              <span className="text-2xl font-light tracking-[0.2em] text-violet-600">tantra</span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500 tracking-wide">AI career navigator</p>
           </div>
         </div>
 

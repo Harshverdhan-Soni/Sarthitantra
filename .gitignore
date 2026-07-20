@@ -1,5 +1,7 @@
 # ── Personal / sensitive data (never commit) ──────────────────────────────
 profile.md
+sarthitantra_config.json
+.sarthitantra_session.json
 profile1.md
 profile_backup.md
 profilelast.md

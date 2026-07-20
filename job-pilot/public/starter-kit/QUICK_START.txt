@@ -1,0 +1,95 @@
+SARTHITANTRA — QUICK START GUIDE
+══════════════════════════════════════════════════════════════════
+Your personal AI-powered job application assistant.
+Website: https://sarthitantra.netlify.app
+══════════════════════════════════════════════════════════════════
+
+WHAT IS IN THIS FOLDER
+──────────────────────────────────────────────────────────────────
+  sarthitantra_config.json     Your secure connection to the cloud
+  folder-instructions.md       Tells Claude Cowork what to do
+  scripts/fetch_profile.py     Syncs your profile from the cloud
+  master/                      Your master resume is downloaded here
+  jobs/                        Cowork creates one subfolder per job
+
+
+STEP 1  Install the Python dependency  (one-time setup)
+──────────────────────────────────────────────────────────────────
+Open a terminal / Command Prompt and run:
+
+    pip install supabase
+
+That's the only dependency needed.
+
+
+STEP 2  Connect this folder to Claude Cowork
+──────────────────────────────────────────────────────────────────
+1. Open the Claude desktop app.
+2. In Cowork mode, click the folder icon or "Select folder".
+3. Navigate to THIS folder and select it.
+4. Claude will now automatically read folder-instructions.md at
+   the start of every session.
+
+
+STEP 3  Start your first session
+──────────────────────────────────────────────────────────────────
+Type either of these prompts in Cowork to kick off the pipeline:
+
+  QUICK:
+  "Run the full job pipeline."
+
+  DETAILED (paste this for your first run):
+  "Sync my profile from Sarthitantra, then source new job roles
+   matching my preferences, score and filter them, tailor my
+   resume for the top matches, pre-fill the application forms,
+   and show me a summary of everything ready for my approval."
+
+Cowork will:
+  • Sync your profile from the cloud automatically
+  • Search for new matching roles via your email alerts + web
+  • Score each role against your preferences (0–100)
+  • Skip deal-breakers and low-score roles automatically
+  • Generate a tailored resume + cover letter per top role
+  • Pre-fill the application forms in your browser
+  • Stop before submitting — you always approve and submit
+
+
+STEP 4  Updating your profile
+──────────────────────────────────────────────────────────────────
+Edit your profile anytime at: https://sarthitantra.netlify.app
+Go to the "My Profile" tab, make changes, and save.
+
+Your updates sync to this folder automatically at the start of
+every Cowork run. To sync manually at any time:
+
+    python scripts/fetch_profile.py
+
+(On first run it asks for your Sarthitantra password once, then
+saves a token so future runs are fully automatic.)
+
+
+STEP 5  Marking applications as submitted
+──────────────────────────────────────────────────────────────────
+Cowork pre-fills and stops — YOU click Submit on the company
+website. Once you have submitted, tell Cowork:
+
+    "I submitted JOB-XXX"
+
+Or run directly:
+
+    python scripts/mark_applied.py JOB-XXX
+
+
+USEFUL COWORK PROMPTS
+──────────────────────────────────────────────────────────────────
+  "Run the full job pipeline."
+  "Show me jobs awaiting my approval."
+  "Mark JOB-042 as submitted."
+  "Cancel JOB-038 — I changed my mind."
+  "Show me all jobs I have applied to this week."
+  "Re-sync my profile from the cloud."
+
+
+══════════════════════════════════════════════════════════════════
+Need help? Visit https://sarthitantra.netlify.app
+══════════════════════════════════════════════════════════════════

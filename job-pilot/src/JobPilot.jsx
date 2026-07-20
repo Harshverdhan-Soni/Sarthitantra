@@ -5,19 +5,19 @@ import {
   MapPin, Building2, Trash2, Plus, X, CheckCircle2, AlertTriangle,
   ExternalLink, RotateCcw, FileText, Wand2, FileUp, Loader2,
   FolderOpen, RefreshCw, Eye, Plug, FileSignature, Clock,
-  Users, UserPlus, ChevronDown, ChevronUp, GraduationCap,
-  Send, AlertCircle, RotateCw
+  ChevronDown, ChevronUp, GraduationCap,
+  Send, AlertCircle, RotateCw, UserCircle, Layers
 } from "lucide-react";
+import ProfileEditor from "./ProfileEditor.jsx";
 import { extractText, analyzeResume, buildProfileMd } from "./resumeAnalyzer.js";
 import {
   FS_OK, pickFolder, ensurePermission, saveHandle, loadHandle,
   scanJobs, readTrackerBuffer, previewFile,
-  ensureManifest, addApplicant, scanApplicantFiles, writeApplicantResume,
-  readProfileMd, parseProfileMd,
+  scanApplicantFiles, writeApplicantResume,
 } from "./folderAccess.js";
 import { matchSkills, SKILLS, matchExistingSkillsForJob } from "./skillsCatalog.js";
 import {
-  fetchAll, saveProfile, savePrefs, saveSkillState,
+  fetchAll, saveCareerProfile, saveSkillState,
   saveListing, syncListings, deleteListing, debounced,
 } from "./db.js";
 
@@ -226,49 +226,6 @@ function SkillChecklist({ skillIds, existingSkills, skillState, onToggle }) {
   );
 }
 
-function ApplicantModal({ manifest, onSelect, onCreate, onClose }) {
-  const [name, setName] = useState("");
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="mb-1 flex items-center gap-2 text-base font-bold text-slate-800"><Users size={18} /> Whose resume is this?</h3>
-        <p className="mb-4 text-xs text-slate-500">Pick a profile to load their resume, preferences, and job tracker — or add a new applicant.</p>
-
-        {manifest.length > 0 && (
-          <div className="mb-4 space-y-2">
-            {manifest.map((a) => (
-              <button key={a.id} onClick={() => onSelect(a)}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left hover:border-indigo-400 hover:bg-indigo-50">
-                <span className="font-medium text-slate-800">{a.name}</span>
-                <span className="text-xs text-slate-400">{a.trackerFile}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="border-t border-slate-200 pt-4">
-          <label className="mb-2 block text-xs font-semibold text-slate-600">Add new applicant</label>
-          <div className="flex gap-2">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Full name"
-              onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onCreate(name); }}
-              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-            <button onClick={() => name.trim() && onCreate(name)} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: ACCENT }}>
-              <UserPlus size={16} /> Create
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-slate-400">Creates <code className="rounded bg-slate-100 px-1">master/&lt;name&gt;/</code> and its own tracker Excel — their jobs stay separate from everyone else's.</p>
-        </div>
-
-        <button onClick={onClose} className="mt-4 w-full text-center text-xs text-slate-400 hover:text-slate-600">Cancel</button>
-      </div>
-    </div>
-  );
-}
-
 function ApplyPanel({ listing, profile, onConfirm, onCancel }) {
   const initial = {};
   APPLY_FIELDS.forEach(({ key }) => {
@@ -366,11 +323,11 @@ function ApplyPanel({ listing, profile, onConfirm, onCancel }) {
   );
 }
 
-export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
+export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfile = "Main", onProfileSwitch }) {
   const [tab, setTab] = useState("setup");
-  // Use user.id as namespace so localStorage is isolated per user
-  const [namespace, setNamespace] = useState(() => user?.id ?? "local");
-  const ns0 = user?.id ?? "local";
+  // Namespace = userId + profileName so each career track is isolated
+  const ns0 = `${user?.id ?? "local"}_${activeProfile}`;
+  const [namespace, setNamespace] = useState(ns0);
   const [prefs, setPrefs] = useState(() => ({ ...DEFAULT_PREFS, ...load(`jp_prefs_${ns0}`, {}) }));
   const [listings, setListings] = useState(() => load(`jp_listings_${ns0}`, []));
   const [profile, setProfile] = useState(() => ({ ...DEFAULT_PROFILE, ...load(`jp_profile_${ns0}`, {}) }));
@@ -383,10 +340,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   const [jobFiles, setJobFiles] = useState([]);
   const [savedHandle, setSavedHandle] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [manifest, setManifest] = useState([]);
-  const [activeApplicant, setActiveApplicant] = useState(null);
-  const [showApplicantPicker, setShowApplicantPicker] = useState(false);
-  const [applicantFiles, setApplicantFiles] = useState([]);
+  const [folderFiles, setFolderFiles] = useState([]); // resumes in connected folder
   const [pendingResumeChoice, setPendingResumeChoice] = useState(null);
   const [applyPanelId, setApplyPanelId] = useState(null);
   const [search, setSearch] = useState("");
@@ -400,17 +354,20 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   // ── Save to localStorage immediately, sync to Supabase after a short delay ──
   useEffect(() => {
     save(`jp_prefs_${namespace}`, prefs);
-    if (user && cloudSynced) debounced("prefs", () => savePrefs(user.id, prefs));
+    if (user && cloudSynced) debounced("prefs", () =>
+      saveCareerProfile(user.id, activeProfile, profile, prefs));
   }, [prefs, namespace]);
 
   useEffect(() => {
     save(`jp_listings_${namespace}`, listings);
-    if (user && cloudSynced) debounced("listings", () => syncListings(user.id, listings));
+    if (user && cloudSynced) debounced("listings", () =>
+      syncListings(user.id, listings, activeProfile));
   }, [listings, namespace]);
 
   useEffect(() => {
     save(`jp_profile_${namespace}`, profile);
-    if (user && cloudSynced) debounced("profile", () => saveProfile(user.id, profile));
+    if (user && cloudSynced) debounced("profile", () =>
+      saveCareerProfile(user.id, activeProfile, profile, prefs));
   }, [profile, namespace]);
 
   useEffect(() => {
@@ -418,17 +375,27 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
     if (user && cloudSynced) debounced("skills", () => saveSkillState(user.id, skillState));
   }, [skillState, namespace]);
 
-  // ── On login: fetch cloud data and merge (cloud wins over local cache) ──────
+  // ── On login or profile switch: fetch cloud data and merge ──────────────────
   useEffect(() => {
     if (!user) return;
-    fetchAll(user.id).then(({ profile: cp, prefs: cpr, listings: cl, skillState: cs }) => {
-      if (cp)  { setProfile((p) => ({ ...p, ...cp })); save(`jp_profile_${user.id}`, { ...profile, ...cp }); setAnalyzed(true); }
-      if (cpr) { setPrefs((p) => ({ ...DEFAULT_PREFS, ...cpr })); save(`jp_prefs_${user.id}`, cpr); }
-      if (cl && cl.length > 0) { setListings(cl); save(`jp_listings_${user.id}`, cl); }
-      if (cs)  { setSkillState(cs); save(`jp_skills_${user.id}`, cs); }
+    const newNs = `${user.id}_${activeProfile}`;
+    setNamespace(newNs);
+    // Load local cache for this profile immediately
+    setPrefs({ ...DEFAULT_PREFS, ...load(`jp_prefs_${newNs}`, {}) });
+    setListings(load(`jp_listings_${newNs}`, []));
+    setProfile({ ...DEFAULT_PROFILE, ...load(`jp_profile_${newNs}`, {}) });
+    setSkillState(load(`jp_skills_${newNs}`, {}));
+    setAnalyzed(!!load(`jp_profile_${newNs}`, null));
+    setCloudSynced(false);
+    // Then fetch from Supabase (cloud wins)
+    fetchAll(user.id, activeProfile).then(({ profile: cp, prefs: cpr, listings: cl, skillState: cs }) => {
+      if (cp)  { setProfile((p) => ({ ...p, ...cp })); save(`jp_profile_${newNs}`, { ...profile, ...cp }); setAnalyzed(true); }
+      if (cpr) { setPrefs((p) => ({ ...DEFAULT_PREFS, ...cpr })); save(`jp_prefs_${newNs}`, cpr); }
+      if (cl && cl.length > 0) { setListings(cl); save(`jp_listings_${newNs}`, cl); }
+      if (cs)  { setSkillState(cs); save(`jp_skills_${newNs}`, cs); }
       setCloudSynced(true);
     });
-  }, [user?.id]);
+  }, [user?.id, activeProfile]);
 
   useEffect(() => { if (FS_OK) loadHandle().then((h) => { if (h) setSavedHandle(h); }); }, []);
 
@@ -437,16 +404,6 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   const updateProfile = (k, v) => setProfile((p) => ({ ...p, [k]: v }));
   const toggleSkill = (id) => setSkillState((s) => ({ ...s, [id]: !s[id] }));
 
-  const switchApplicant = (entry) => {
-    const ns = entry ? entry.id : "local";
-    setActiveApplicant(entry || null);
-    setNamespace(ns);
-    setPrefs({ ...DEFAULT_PREFS, ...load(`jp_prefs_${ns}`, {}) });
-    setListings(load(`jp_listings_${ns}`, []));
-    setProfile({ ...DEFAULT_PROFILE, ...load(`jp_profile_${ns}`, {}) });
-    setSkillState(load(`jp_skills_${ns}`, {}));
-    setAnalyzed(!!load(`jp_profile_${ns}`, null));
-  };
 
   const parseTrackerBuffer = (buf) => {
     try {
@@ -461,8 +418,11 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   const activateFolder = async (h) => {
     setDirHandle(h); setFolderName(h.name);
     setJobFiles(await scanJobs(h));
-    const m = await ensureManifest(h);
-    setManifest(m); setShowApplicantPicker(true);
+    // Scan for resumes in master/<activeProfile>/ (or master/ root for legacy)
+    try {
+      const files = await scanApplicantFiles(h, activeProfile);
+      setFolderFiles(files);
+    } catch { setFolderFiles([]); }
     flash("Folder connected.");
   };
 
@@ -483,8 +443,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
 
   const disconnectFolder = () => {
     setDirHandle(null); setFolderName(""); setJobFiles([]);
-    setManifest([]); setApplicantFiles([]); setPendingResumeChoice(null);
-    switchApplicant(null);
+    setFolderFiles([]); setPendingResumeChoice(null);
   };
 
   const analyzeAndApply = async (file) => {
@@ -560,19 +519,20 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
 
   const handleResumeUploadInput = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
-    if (!file || !dirHandle || !activeApplicant) return;
+    if (!file || !dirHandle) return;
     try {
-      await writeApplicantResume(dirHandle, activeApplicant.folder, file);
-      const files = await scanApplicantFiles(dirHandle, activeApplicant.folder);
-      setApplicantFiles(files);
-      flash(`Saved ${file.name} to ${activeApplicant.name}'s folder.`);
+      await writeApplicantResume(dirHandle, activeProfile, file);
+      const files = await scanApplicantFiles(dirHandle, activeProfile);
+      setFolderFiles(files);
+      flash(`Saved ${file.name} to ${activeProfile} folder.`);
       if (files.length <= 1) { await analyzeAndApply(file); } else { setPendingResumeChoice(file.name); }
     } catch { flash("Could not write to the folder."); }
   };
 
   const useResumeFromFolder = async (fileEntry) => {
     const file = await fileEntry.handle.getFile();
-    await analyzeAndApply(file); setPendingResumeChoice(null);
+    await analyzeAndApply(file);
+    setPendingResumeChoice(null);
   };
 
   const generateProfileMd = () => {
@@ -668,10 +628,16 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   };
 
   const refreshFromFolder = async () => {
-    if (!dirHandle || !activeApplicant) return;
+    if (!dirHandle) return;
     setJobFiles(await scanJobs(dirHandle));
-    const buf = await readTrackerBuffer(dirHandle, activeApplicant.trackerFile);
-    if (buf) parseTrackerBuffer(buf); else flash("No tracker found in folder for this profile yet.");
+    // Try tracker named after the active profile
+    const trackerFile = `applications_tracker_${activeProfile.toLowerCase().replace(/\s+/g, "-")}.xlsx`;
+    const buf = await readTrackerBuffer(dirHandle, trackerFile)
+      ?? await readTrackerBuffer(dirHandle, "applications_tracker_NEW.xlsx")
+      ?? await readTrackerBuffer(dirHandle, "applications_tracker.xlsx");
+    if (buf) parseTrackerBuffer(buf); else flash("No tracker found in folder for this track yet.");
+    // Refresh resume list
+    try { setFolderFiles(await scanApplicantFiles(dirHandle, activeProfile)); } catch {}
   };
 
   const filtered = useMemo(() => {
@@ -701,14 +667,15 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
       <div className="mx-auto max-w-5xl px-4 py-6">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-xl text-white" style={{ background: ACCENT }}>
-              <Briefcase size={22} />
-            </div>
+            <img src="/logo-icon.svg" alt="" aria-hidden="true" className="h-11 w-11 flex-shrink-0 rounded-xl" />
             <div>
-              <h1 className="text-xl font-bold leading-tight">Job Pilot</h1>
-              <p className="text-xs text-slate-500">
-                Control panel for your Cowork application pipeline
-                {activeApplicant && <> · <span className="font-semibold text-slate-700">{activeApplicant.name}</span></>}
+              <div className="flex items-baseline gap-1 leading-none">
+                <span className="text-xl font-bold tracking-tight text-indigo-900">Sarthi</span>
+                <span className="text-base font-light tracking-[0.18em] text-violet-600">tantra</span>
+              </div>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-400 tracking-wide uppercase">
+                AI career navigator
+                {activeProfile !== "Main" && <> · <span className="normal-case font-semibold text-indigo-600">{activeProfile}</span></>}
               </p>
             </div>
           </div>
@@ -736,11 +703,6 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                 </button>
               </div>
             )}
-            {dirHandle && activeApplicant && (
-              <button onClick={() => setShowApplicantPicker(true)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">
-                <Users size={16} /> {activeApplicant.name}
-              </button>
-            )}
             {FS_OK && (
               dirHandle ? (
                 <span className="inline-flex items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
@@ -765,7 +727,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
         </div>
 
         <div className="mb-5 flex gap-1 rounded-xl bg-slate-200 p-1">
-          {[["setup", "Setup", FileText], ["board", "Job Board", Briefcase]].map(([k, label, Icon]) => (
+          {[["setup", "Setup", FileText], ["board", "Job Board", Briefcase], ["profile", "My Profile", UserCircle]].map(([k, label, Icon]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === k ? "bg-white shadow-sm" : "text-slate-500"}`}>
               <Icon size={16} /> {label}
@@ -796,7 +758,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                 <p className="mt-1 text-xs text-amber-700">Connecting to your project folder needs Chrome or Edge.</p>
               ) : !dirHandle ? (
                 <>
-                  <p className="mb-3 mt-1 text-xs text-slate-500">Connect your Cowork project folder to manage resumes per applicant.</p>
+                  <p className="mb-3 mt-1 text-xs text-slate-500">Connect your Cowork project folder to manage local resumes.</p>
                   <div className="flex gap-2">
                     <button onClick={connectFolder} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: ACCENT }}>
                       <FolderOpen size={16} /> Connect project folder
@@ -808,28 +770,18 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                     )}
                   </div>
                 </>
-              ) : !activeApplicant ? (
-                <>
-                  <p className="mb-3 mt-1 text-xs text-slate-500">Connected to <span className="font-semibold text-slate-700">{folderName}</span>. Pick a profile.</p>
-                  <button onClick={() => setShowApplicantPicker(true)} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: ACCENT }}>
-                    <Users size={16} /> Choose profile
-                  </button>
-                </>
               ) : (
                 <>
                   <div className="mb-3 mt-1 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-slate-500">
-                      Connected to <span className="font-semibold text-slate-700">{folderName}</span> · profile: <span className="font-semibold text-slate-700">{activeApplicant.name}</span>
+                      Connected to <span className="font-semibold text-slate-700">{folderName}</span> · track: <span className="font-semibold text-indigo-600">{activeProfile}</span>
                     </p>
-                    <button onClick={() => setShowApplicantPicker(true)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline">
-                      <Users size={13} /> Switch profile
-                    </button>
                   </div>
-                  {applicantFiles.length === 0 ? (
-                    <p className="mb-3 text-sm text-slate-400 italic">No resumes yet for {activeApplicant.name} — upload one below.</p>
+                  {folderFiles.length === 0 ? (
+                    <p className="mb-3 text-sm text-slate-400 italic">No resumes in this track yet — upload one below.</p>
                   ) : (
                     <div className="mb-3 space-y-2">
-                      {applicantFiles.map((f) => (
+                      {folderFiles.map((f) => (
                         <div key={f.name} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
                           <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700"><FileText size={14} className="shrink-0" /> <span className="truncate">{f.name}</span></span>
                           <div className="flex shrink-0 items-center gap-3">
@@ -844,7 +796,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       <span>New resume uploaded: <span className="font-semibold">{pendingResumeChoice}</span>. Use it to populate the profile fields?</span>
                       <div className="flex gap-3">
-                        <button onClick={async () => { const f = applicantFiles.find((x) => x.name === pendingResumeChoice); if (f) await useResumeFromFolder(f); }} className="font-semibold text-emerald-700 hover:underline">Yes, use it</button>
+                        <button onClick={async () => { const f = folderFiles.find((x) => x.name === pendingResumeChoice); if (f) await useResumeFromFolder(f); }} className="font-semibold text-emerald-700 hover:underline">Yes, use it</button>
                         <button onClick={() => setPendingResumeChoice(null)} className="text-slate-500 hover:underline">Dismiss</button>
                       </div>
                     </div>
@@ -853,7 +805,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                     <FileSignature size={16} /> Upload resume
                     <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={handleResumeUploadInput} className="hidden" />
                   </label>
-                  <p className="mt-2 text-xs text-slate-400">Saved into <code className="rounded bg-slate-100 px-1">master/{activeApplicant.folder}/</code>.</p>
+                  <p className="mt-2 text-xs text-slate-400">Saved into <code className="rounded bg-slate-100 px-1">master/{activeProfile}/</code>.</p>
                 </>
               )}
             </div>
@@ -945,7 +897,10 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-5">
                   <h3 className="mb-1 text-sm font-bold text-slate-700">Generate profile.md</h3>
-                  <p className="mb-3 text-xs text-slate-500">Combines your details, summary, skills, and preferences into the file Cowork reads.</p>
+                  <p className="mb-3 text-xs text-slate-500">
+                    Manual fallback only — <code className="rounded bg-slate-100 px-1">fetch_profile.py</code> syncs this automatically at the start of every Cowork session.
+                    Use this button only if the script is unavailable or you want to inspect the file.
+                  </p>
                   <button onClick={generateProfileMd} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: ACCENT }}>
                     <Wand2 size={16} /> Generate &amp; download profile.md
                   </button>
@@ -987,7 +942,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
                 <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={hideDB} onChange={(e) => setHideDB(e.target.checked)} /> Hide deal-breakers</label>
                 <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyStar} onChange={(e) => setOnlyStar(e.target.checked)} /> Starred only</label>
                 <div className="ml-auto flex gap-2">
-                  {dirHandle && activeApplicant && (
+                  {dirHandle && (
                     <button onClick={refreshFromFolder} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50">
                       <RefreshCw size={16} /> Refresh from folder
                     </button>
@@ -1093,11 +1048,101 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
             )}
           </div>
         )}
-      </div>
 
-      {showApplicantPicker && (
-        <ApplicantModal manifest={manifest} onSelect={selectApplicant} onCreate={createApplicant} onClose={() => setShowApplicantPicker(false)} />
-      )}
+        {tab === "profile" && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <ProfileEditor
+              user={user}
+              activeProfile={activeProfile}
+              onProfileSwitch={onProfileSwitch}
+              profile={(() => {
+                // Map JobPilot's internal profile + prefs shapes to the ProfileEditor schema
+                return {
+                  onboardingComplete: true,
+                  fullName:       profile.name || "",
+                  email:          profile.email || user?.email || "",
+                  phone:          profile.phone || "",
+                  location:       profile.location || "",
+                  openToRelocation: profile.relocation?.toLowerCase().startsWith("y") ?? true,
+                  relocationNotes:  profile.relocation || "",
+                  preferredWorkMode: profile.workMode || "Remote",
+                  workAuth:         profile.workAuth || "",
+                  sponsorshipNeeded: !!profile.sponsorship,
+                  noticePeriod:     profile.noticePeriod || "",
+                  currentCtc:       profile.currentCtc || "",
+                  expectedCtc:      profile.expectedCtc || "",
+                  earliestStartDate: profile.startDate || "",
+                  currentlyEmployed: true,
+                  currentTitle:     "",
+                  currentOrg:       "",
+                  professionalSummary: profile.summary || "",
+                  skillsGenAI:  (profile.skillsByCategory?.["Generative AI & LLMs"] ?? []),
+                  skillsML:     (profile.skillsByCategory?.["ML & AI Research"] ?? []),
+                  skillsDev:    (profile.skillsByCategory?.["Development & Databases"] ?? []),
+                  skillsDomains:(profile.skillsByCategory?.["Domains & Other"] ?? []),
+                  portfolio:    profile.portfolio || "",
+                  linkedin:     profile.linkedin || "",
+                  github:       profile.github || "",
+                  youtube:      "",
+                  scholar:      profile.scholar || "",
+                  targetTitles:     prefs.targetTitles || [],
+                  targetLocations:  prefs.locations || [],
+                  mustHaves:        prefs.mustHaves || [],
+                  niceToHaves:      prefs.niceToHaves || [],
+                  dealBreakers:     prefs.dealBreakers || [],
+                  scoreThreshold:   prefs.scoreThreshold ?? 70,
+                  dailyCap:         prefs.dailyCap ?? 8,
+                  masterResumeUrl:  "",
+                  masterResumeName: "",
+                  education:        "",
+                  currentRoleHighlights: "",
+                  research:         "",
+                  standardAnswers:  "",
+                };
+              })()}
+              onSave={(updated) => {
+                // Write back into internal profile + prefs
+                setProfile((p) => ({
+                  ...p,
+                  name:     updated.fullName,
+                  email:    updated.email,
+                  phone:    updated.phone,
+                  location: updated.location,
+                  relocation:   updated.openToRelocation ? `Yes — ${updated.relocationNotes || "open to relocation"}` : "No",
+                  workMode:     updated.preferredWorkMode,
+                  workAuth:     updated.workAuth,
+                  sponsorship:  updated.sponsorshipNeeded ? "Yes — requires visa/work-permit sponsorship" : "No",
+                  noticePeriod: updated.noticePeriod,
+                  currentCtc:   updated.currentCtc,
+                  expectedCtc:  updated.expectedCtc,
+                  startDate:    updated.earliestStartDate,
+                  summary:      updated.professionalSummary,
+                  linkedin:     updated.linkedin,
+                  github:       updated.github,
+                  portfolio:    updated.portfolio,
+                  scholar:      updated.scholar,
+                  skillsByCategory: {
+                    "Generative AI & LLMs": updated.skillsGenAI,
+                    "ML & AI Research":     updated.skillsML,
+                    "Development & Databases": updated.skillsDev,
+                    "Domains & Other":      updated.skillsDomains,
+                  },
+                }));
+                setPrefs((prev) => ({
+                  ...prev,
+                  targetTitles:   updated.targetTitles,
+                  locations:      updated.targetLocations,
+                  mustHaves:      updated.mustHaves,
+                  niceToHaves:    updated.niceToHaves,
+                  dealBreakers:   updated.dealBreakers,
+                  scoreThreshold: updated.scoreThreshold,
+                  dailyCap:       updated.dailyCap,
+                }));
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreview(null)}>

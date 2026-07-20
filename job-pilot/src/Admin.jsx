@@ -95,6 +95,7 @@ export default function Admin({ user, onLogout, onBack }) {
   const [actionLoading, setAL]    = useState({}); // { [userId]: true }
   const [confirmDelete, setCD]    = useState(null); // user object to confirm
   const [toast, setToast]         = useState("");
+  const [selectedUser, setSelectedUser] = useState(null); // user row clicked
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -142,9 +143,12 @@ export default function Admin({ user, onLogout, onBack }) {
   const { sorted, toggle, Icon: SortIcon } = useSorted(users);
   const filtered = sorted.filter(u => !search || u.email?.toLowerCase().includes(search.toLowerCase()));
 
-  const totalListings  = users.reduce((s, u) => s + Number(u.listing_count  ?? 0), 0);
-  const totalAwaiting  = users.reduce((s, u) => s + Number(u.awaiting_count ?? 0), 0);
-  const totalSubmitted = users.reduce((s, u) => s + Number(u.submitted_count ?? 0), 0);
+  // Stats shown in cards — either selected user or aggregate totals
+  const statsSource = selectedUser ? [selectedUser] : users;
+  const statListings  = statsSource.reduce((s, u) => s + Number(u.listing_count  ?? 0), 0);
+  const statAwaiting  = statsSource.reduce((s, u) => s + Number(u.awaiting_count ?? 0), 0);
+  const statSubmitted = statsSource.reduce((s, u) => s + Number(u.submitted_count ?? 0), 0);
+  const statTailored  = statsSource.reduce((s, u) => s + Number(u.tailored_count  ?? 0), 0);
 
   const cols = [
     { key: "email",           label: "User" },
@@ -209,12 +213,30 @@ export default function Admin({ user, onLogout, onBack }) {
           </div>
         )}
 
-        {/* Stat cards */}
+        {/* Stat cards — aggregate or per-user */}
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-500">
+            {selectedUser ? (
+              <span>
+                Showing stats for{" "}
+                <span className="font-semibold text-slate-700">{selectedUser.email}</span>
+              </span>
+            ) : (
+              <span>All users — click a row to view individual stats</span>
+            )}
+          </p>
+          {selectedUser && (
+            <button onClick={() => setSelectedUser(null)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">
+              <X size={13} /> Clear selection
+            </button>
+          )}
+        </div>
         <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard icon={Users}        label="Total users"       value={users.length}   color="#4f46e5" />
-          <StatCard icon={Briefcase}    label="Total listings"    value={totalListings}  color="#0284c7" />
-          <StatCard icon={Clock}        label="Awaiting approval" value={totalAwaiting}  color="#d97706" />
-          <StatCard icon={CheckCircle2} label="Submitted"         value={totalSubmitted} color="#16a34a" />
+          <StatCard icon={Users}        label={selectedUser ? "User"             : "Total users"}       value={selectedUser ? 1              : users.length}  color="#4f46e5" />
+          <StatCard icon={Briefcase}    label="Listings"         value={statListings}  color="#0284c7" />
+          <StatCard icon={Clock}        label="Awaiting approval" value={statAwaiting}  color="#d97706" />
+          <StatCard icon={CheckCircle2} label="Submitted"         value={statSubmitted} color="#16a34a" />
         </div>
 
         {/* User table */}
@@ -263,11 +285,23 @@ export default function Admin({ user, onLogout, onBack }) {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filtered.map((u) => {
-                    const isSelf = u.user_id === user?.id;
-                    const busy   = !!actionLoading[u.user_id];
+                    const isSelf   = u.user_id === user?.id;
+                    const busy     = !!actionLoading[u.user_id];
+                    const isSelected = selectedUser?.user_id === u.user_id;
                     return (
                       <tr key={u.user_id}
-                        className={`transition-colors ${u.is_blocked ? "bg-rose-50 hover:bg-rose-100" : "hover:bg-slate-50"}`}>
+                        onClick={(e) => {
+                          // Don't trigger selection when clicking action buttons
+                          if (e.target.closest("button")) return;
+                          setSelectedUser(isSelected ? null : u);
+                        }}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200"
+                            : u.is_blocked
+                              ? "bg-rose-50 hover:bg-rose-100"
+                              : "hover:bg-slate-50"
+                        }`}>
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-2">
                             <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white ${u.is_blocked ? "bg-rose-400" : ""}`}

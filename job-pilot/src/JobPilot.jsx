@@ -16,6 +16,10 @@ import {
   readProfileMd, parseProfileMd,
 } from "./folderAccess.js";
 import { matchSkills, SKILLS, matchExistingSkillsForJob } from "./skillsCatalog.js";
+import {
+  fetchAll, saveProfile, savePrefs, saveSkillState,
+  saveListing, syncListings, deleteListing, debounced,
+} from "./db.js";
 
 const ACCENT = "#4f46e5";
 
@@ -362,13 +366,16 @@ function ApplyPanel({ listing, profile, onConfirm, onCancel }) {
   );
 }
 
-export default function JobPilot() {
+export default function JobPilot({ user, onLogout, isAdmin, onAdmin }) {
   const [tab, setTab] = useState("setup");
-  const [namespace, setNamespace] = useState("local");
-  const [prefs, setPrefs] = useState(() => ({ ...DEFAULT_PREFS, ...load("jp_prefs_local", {}) }));
-  const [listings, setListings] = useState(() => load("jp_listings_local", []));
-  const [profile, setProfile] = useState(() => ({ ...DEFAULT_PROFILE, ...load("jp_profile_local", {}) }));
-  const [skillState, setSkillState] = useState(() => load("jp_skills_local", {}));
+  // Use user.id as namespace so localStorage is isolated per user
+  const [namespace, setNamespace] = useState(() => user?.id ?? "local");
+  const ns0 = user?.id ?? "local";
+  const [prefs, setPrefs] = useState(() => ({ ...DEFAULT_PREFS, ...load(`jp_prefs_${ns0}`, {}) }));
+  const [listings, setListings] = useState(() => load(`jp_listings_${ns0}`, []));
+  const [profile, setProfile] = useState(() => ({ ...DEFAULT_PROFILE, ...load(`jp_profile_${ns0}`, {}) }));
+  const [skillState, setSkillState] = useState(() => load(`jp_skills_${ns0}`, {}));
+  const [cloudSynced, setCloudSynced] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzed, setAnalyzed] = useState(() => !!load("jp_profile_local", null));
   const [dirHandle, setDirHandle] = useState(null);
@@ -390,10 +397,39 @@ export default function JobPilot() {
   const [sortBy, setSortBy] = useState("score");
   const [toast, setToast] = useState("");
 
-  useEffect(() => { save(`jp_prefs_${namespace}`, prefs); }, [prefs, namespace]);
-  useEffect(() => { save(`jp_listings_${namespace}`, listings); }, [listings, namespace]);
-  useEffect(() => { save(`jp_profile_${namespace}`, profile); }, [profile, namespace]);
-  useEffect(() => { save(`jp_skills_${namespace}`, skillState); }, [skillState, namespace]);
+  // ── Save to localStorage immediately, sync to Supabase after a short delay ──
+  useEffect(() => {
+    save(`jp_prefs_${namespace}`, prefs);
+    if (user && cloudSynced) debounced("prefs", () => savePrefs(user.id, prefs));
+  }, [prefs, namespace]);
+
+  useEffect(() => {
+    save(`jp_listings_${namespace}`, listings);
+    if (user && cloudSynced) debounced("listings", () => syncListings(user.id, listings));
+  }, [listings, namespace]);
+
+  useEffect(() => {
+    save(`jp_profile_${namespace}`, profile);
+    if (user && cloudSynced) debounced("profile", () => saveProfile(user.id, profile));
+  }, [profile, namespace]);
+
+  useEffect(() => {
+    save(`jp_skills_${namespace}`, skillState);
+    if (user && cloudSynced) debounced("skills", () => saveSkillState(user.id, skillState));
+  }, [skillState, namespace]);
+
+  // ── On login: fetch cloud data and merge (cloud wins over local cache) ──────
+  useEffect(() => {
+    if (!user) return;
+    fetchAll(user.id).then(({ profile: cp, prefs: cpr, listings: cl, skillState: cs }) => {
+      if (cp)  { setProfile((p) => ({ ...p, ...cp })); save(`jp_profile_${user.id}`, { ...profile, ...cp }); setAnalyzed(true); }
+      if (cpr) { setPrefs((p) => ({ ...DEFAULT_PREFS, ...cpr })); save(`jp_prefs_${user.id}`, cpr); }
+      if (cl && cl.length > 0) { setListings(cl); save(`jp_listings_${user.id}`, cl); }
+      if (cs)  { setSkillState(cs); save(`jp_skills_${user.id}`, cs); }
+      setCloudSynced(true);
+    });
+  }, [user?.id]);
+
   useEffect(() => { if (FS_OK) loadHandle().then((h) => { if (h) setSavedHandle(h); }); }, []);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
@@ -677,6 +713,29 @@ export default function JobPilot() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {user && onLogout && (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5">
+                <span className="max-w-[160px] truncate text-xs text-slate-500" title={user.email}>
+                  {user.email}
+                </span>
+                {isAdmin && onAdmin && (
+                  <button
+                    onClick={onAdmin}
+                    className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors border-l border-slate-300 pl-2"
+                    title="Admin panel"
+                  >
+                    Admin
+                  </button>
+                )}
+                <button
+                  onClick={onLogout}
+                  className="text-xs font-medium text-slate-400 hover:text-rose-600 transition-colors border-l border-slate-300 pl-2"
+                  title="Sign out"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
             {dirHandle && activeApplicant && (
               <button onClick={() => setShowApplicantPicker(true)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">
                 <Users size={16} /> {activeApplicant.name}

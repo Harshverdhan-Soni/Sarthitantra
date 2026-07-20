@@ -44,7 +44,12 @@ job-pilot/vite.config.js.bak
 __pycache__/
 *.pyc
 *.pyo
+
+# Environment files (contain secret keys — never commit)
 .env
+.env.local
+**/.env
+**/.env.local
 
 # ── OS artifacts ──────────────────────────────────────────────────────────
 .DS_Store

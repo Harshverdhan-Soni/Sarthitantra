@@ -295,11 +295,11 @@ export default function ProfileEditor({ user, profile, onSave, activeProfile = "
         "master/.gitkeep",
         "jobs/.gitkeep",
       ];
+      const missing = [];
       await Promise.all(STATIC.map(async (path) => {
         try {
           const res = await fetch(`/starter-kit/${path}`);
-          if (!res.ok) return;
-          // Binary files (xlsx) need arrayBuffer; text files use text()
+          if (!res.ok) { missing.push(path); return; }
           if (path.endsWith(".xlsx")) {
             const buf = await res.arrayBuffer();
             zip.file(path, buf);
@@ -307,8 +307,25 @@ export default function ProfileEditor({ user, profile, onSave, activeProfile = "
             const text = await res.text();
             zip.file(path, text);
           }
-        } catch { /* skip missing files gracefully */ }
+        } catch { missing.push(path); }
       }));
+
+      if (!apiToken) {
+        alert(
+          "⚠️  Your config was saved WITHOUT an API token.\n\n" +
+          "This means fetch_profile.py will ask for a password (which won't work for Google login).\n\n" +
+          "Fix: open your Supabase project → SQL Editor → run supabase_cli_auth.sql, " +
+          "then click Download again."
+        );
+      } else if (missing.length > 0) {
+        alert(
+          "⚠️  These files couldn't be fetched and are missing from the zip:\n\n" +
+          missing.join("\n") +
+          "\n\nThis usually means the site hasn't been redeployed yet. Run:\n" +
+          "npm run build && netlify deploy --prod --dir=dist\n" +
+          "then click Download again."
+        );
+      }
 
       const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
       const url = URL.createObjectURL(blob);

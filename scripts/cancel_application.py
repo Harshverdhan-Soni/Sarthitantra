@@ -27,9 +27,22 @@ from datetime import date
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 
+import json as _json
+
 BASE = pathlib.Path(__file__).parent.parent
-WB_PATH = str(BASE / "applications_tracker_NEW.xlsx")
 QUEUE_PATH = BASE / "apply_queue.json"
+
+def _tracker_path():
+    at = BASE / "active_track.json"
+    if at.exists():
+        try:
+            data = _json.loads(at.read_text(encoding="utf-8"))
+            return str(BASE / data.get("tracker_file", "applications_tracker.xlsx"))
+        except Exception:
+            pass
+    return str(BASE / "applications_tracker.xlsx")
+
+WB_PATH = _tracker_path()
 
 GREY = PatternFill("solid", fgColor="D9D9D9")
 BOLD = Font(bold=True)

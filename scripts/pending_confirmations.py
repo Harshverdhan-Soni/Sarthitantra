@@ -14,8 +14,21 @@ import sys
 import pathlib
 from openpyxl import load_workbook
 
+import json as _json
+
 BASE = pathlib.Path(__file__).parent.parent
-WB_PATH = str(BASE / "applications_tracker_NEW.xlsx")
+
+def _tracker_path():
+    at = BASE / "active_track.json"
+    if at.exists():
+        try:
+            data = _json.loads(at.read_text(encoding="utf-8"))
+            return str(BASE / data.get("tracker_file", "applications_tracker.xlsx"))
+        except Exception:
+            pass
+    return str(BASE / "applications_tracker.xlsx")
+
+WB_PATH = _tracker_path()
 
 COL_ID = 1
 COL_COMPANY = 4

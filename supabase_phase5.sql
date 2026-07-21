@@ -41,9 +41,29 @@ ALTER TABLE job_listings
 CREATE INDEX IF NOT EXISTS job_listings_user_profile_idx
   ON job_listings(user_id, profile_name);
 
+-- ── 5. Unique constraint for sync_jobs.py upserts ─────────────────────
+-- Allows sync_jobs.py to safely upsert rows without creating duplicates.
+-- job_id here is the Job ID string from the tracker (e.g. "JOB-001").
+ALTER TABLE job_listings
+  ADD COLUMN IF NOT EXISTS job_id TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'job_listings_user_job_profile_unique'
+  ) THEN
+    ALTER TABLE job_listings
+      ADD CONSTRAINT job_listings_user_job_profile_unique
+      UNIQUE (user_id, job_id, profile_name);
+  END IF;
+END $$;
+
 -- ══════════════════════════════════════════════════════════════════════
 -- After running this SQL:
 -- 1. Existing users' data is preserved in the 'Main' career track.
 -- 2. New career tracks can be created from the My Profile tab.
 -- 3. Each track has its own job board, preferences, and resume.
+-- 4. sync_jobs.py can upsert tracker rows directly to Supabase
+--    without duplicates (keyed by user_id + job_id + profile_name).
 -- ══════════════════════════════════════════════════════════════════════

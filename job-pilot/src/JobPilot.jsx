@@ -398,6 +398,8 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
   const [hideDB, setHideDB] = useState(true);
   const [onlyStar, setOnlyStar] = useState(false);
   const [sortBy, setSortBy] = useState("score");
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
   const [toast, setToast] = useState("");
 
   // ── Save to localStorage immediately, sync to Supabase after a short delay ──
@@ -816,6 +818,12 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
     out.sort((a, b) => (sortBy === "score" ? b.score - a.score : String(b.dateSourced).localeCompare(String(a.dateSourced))));
     return out;
   }, [listings, search, minScore, statusFilter, hideDB, onlyStar, sortBy]);
+
+  // Reset to page 1 whenever the filtered set changes
+  useEffect(() => { setPage(1); }, [filtered]);
+
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const stats = useMemo(() => {
     const recommended = listings.filter((l) => l.score >= prefs.scoreThreshold && !isDealBreaker(l)).length;
@@ -1258,6 +1266,10 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                   <option value="score">Sort: Score</option>
                   <option value="date">Sort: Date</option>
                 </select>
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                  {[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n} per page</option>)}
+                  <option value={0}>All</option>
+                </select>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -1288,7 +1300,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
               </div>
             ) : (
               <div className="space-y-3">
-                {filtered.map((l) => {
+                {paginated.map((l) => {
                   const db = isDealBreaker(l);
                   const rec = l.score >= prefs.scoreThreshold && !db;
                   const submitted = l.status === "Submitted";
@@ -1370,6 +1382,49 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                     </div>
                   );
                 })}
+
+                {/* Pagination controls */}
+                {pageSize !== 0 && totalPages > 1 && (
+                  <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <span className="text-sm text-slate-500">
+                      {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length} jobs
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setPage(1)} disabled={page === 1}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >«</button>
+                      <button
+                        onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >‹ Prev</button>
+                      {(() => {
+                        const range = [];
+                        const delta = 2;
+                        for (let i = Math.max(1, page - delta); i <= Math.min(totalPages, page + delta); i++) range.push(i);
+                        const pages = [];
+                        if (range[0] > 1) { pages.push(1); if (range[0] > 2) pages.push("…"); }
+                        range.forEach((n) => pages.push(n));
+                        if (range[range.length - 1] < totalPages) { if (range[range.length - 1] < totalPages - 1) pages.push("…"); pages.push(totalPages); }
+                        return pages.map((n, i) =>
+                          n === "…"
+                            ? <span key={`e${i}`} className="px-1 text-xs text-slate-400">…</span>
+                            : <button key={n} onClick={() => setPage(n)}
+                                className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${n === page ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                              >{n}</button>
+                        );
+                      })()}
+                      <button
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >Next ›</button>
+                      <button
+                        onClick={() => setPage(totalPages)} disabled={page === totalPages}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >»</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

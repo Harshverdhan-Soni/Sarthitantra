@@ -1,10 +1,12 @@
 """
 apply_approved.py — generate apply_queue.json for browser pre-fill automation.
 
-Reads applications_tracker_NEW.xlsx for rows with Status = "Awaiting approval",
-extracts profile details from profile.md, and writes apply_queue.json to the
-JobFinder root. The browser automation step reads this file and pre-fills each
-application form using Claude in Chrome.
+Reads the active track's applications_tracker*.xlsx for rows with Status =
+"Awaiting approval", extracts profile details from the active profile.md, and
+writes apply_queue.json to the JobFinder root. The browser automation step reads
+this file and pre-fills each application form using Claude in Chrome.
+
+Active track is resolved from active_track.json (written by fetch_profile.py).
 
 Usage: python scripts/apply_approved.py
 """
@@ -14,10 +16,23 @@ import re
 from openpyxl import load_workbook
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-BASE        = pathlib.Path(__file__).parent.parent   # JobFinder root
-TRACKER     = BASE / "applications_tracker_NEW.xlsx"
-PROFILE     = BASE / "profile.md"
-QUEUE_FILE  = BASE / "apply_queue.json"
+BASE       = pathlib.Path(__file__).parent.parent   # JobFinder root
+QUEUE_FILE = BASE / "apply_queue.json"
+
+def _load_active_track():
+    """Return (tracker_path, profile_path) from active_track.json, or defaults."""
+    at = BASE / "active_track.json"
+    if at.exists():
+        try:
+            data = json.loads(at.read_text(encoding="utf-8"))
+            tracker_file = data.get("tracker_file", "applications_tracker.xlsx")
+            profile_file = data.get("profile_file", "profile.md")
+            return BASE / tracker_file, BASE / profile_file
+        except Exception:
+            pass
+    return BASE / "applications_tracker.xlsx", BASE / "profile.md"
+
+TRACKER, PROFILE = _load_active_track()
 
 # ── Column indices (0-based) in the tracker ──────────────────────────────────
 COL = {

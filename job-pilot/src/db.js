@@ -300,6 +300,42 @@ export async function fetchAll(userId, profileName = "Main") {
   return { profile, prefs, listings, skillState };
 }
 
+// ── Active Track (persists last selected career track across sessions) ────────
+
+/**
+ * Write the user's currently active career track to Supabase.
+ * Called every time the user switches tracks in the web app.
+ * fetch_profile.py reads this so it always syncs the right track.
+ */
+export async function setActiveTrack(userId, trackName) {
+  try {
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        { user_id: userId, active_track: trackName, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    if (error) throw error;
+  } catch (e) { err("setActiveTrack", e); }
+}
+
+/**
+ * Read the user's last active career track from Supabase.
+ * Returns the track name string, or null if not set yet.
+ * Called on login in main.jsx to restore the track the user was last on.
+ */
+export async function getActiveTrack(userId) {
+  try {
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select("active_track")
+      .eq("user_id", userId)
+      .single();
+    if (error && error.code !== "PGRST116") throw error;
+    return data?.active_track ?? null;
+  } catch (e) { err("getActiveTrack", e); return null; }
+}
+
 // ── Debounce helper ───────────────────────────────────────────────────────────
 
 const timers = {};

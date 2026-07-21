@@ -313,11 +313,63 @@ export const RESUME_SKILL_RESOURCES = {
   "jenkins": { label: "Jenkins official docs", url: "https://www.jenkins.io/doc/" },
   "git": { label: "Git official docs / Pro Git book (free)", url: "https://git-scm.com/book/en/v2" },
   "linux": { label: "Linux Journey (free)", url: "https://linuxjourney.com/" },
+
+  // ── Design & visual tools ────────────────────────────────────────────────
+  "photoshop": { label: "Adobe Photoshop tutorials (official, free)", url: "https://www.adobe.com/learn/photoshop" },
+  "adobe photoshop": { label: "Adobe Photoshop tutorials (official, free)", url: "https://www.adobe.com/learn/photoshop" },
+  "lightroom": { label: "Adobe Lightroom tutorials (official, free)", url: "https://www.adobe.com/learn/lightroom" },
+  "adobe lightroom": { label: "Adobe Lightroom tutorials (official, free)", url: "https://www.adobe.com/learn/lightroom" },
+  "illustrator": { label: "Adobe Illustrator tutorials (official, free)", url: "https://www.adobe.com/learn/illustrator" },
+  "adobe illustrator": { label: "Adobe Illustrator tutorials (official, free)", url: "https://www.adobe.com/learn/illustrator" },
+  "indesign": { label: "Adobe InDesign tutorials (official, free)", url: "https://www.adobe.com/learn/indesign" },
+  "adobe indesign": { label: "Adobe InDesign tutorials (official, free)", url: "https://www.adobe.com/learn/indesign" },
+  "premiere pro": { label: "Adobe Premiere Pro tutorials (official, free)", url: "https://www.adobe.com/learn/premiere-pro" },
+  "adobe premiere": { label: "Adobe Premiere Pro tutorials (official, free)", url: "https://www.adobe.com/learn/premiere-pro" },
+  "after effects": { label: "Adobe After Effects tutorials (official, free)", url: "https://www.adobe.com/learn/after-effects" },
+  "canva": { label: "Canva Design School (free courses)", url: "https://www.canva.com/designschool/" },
+  "figma": { label: "Figma official tutorials (free)", url: "https://help.figma.com/hc/en-us/categories/360002051613-Get-started" },
+  "sketch": { label: "Sketch documentation & tutorials", url: "https://www.sketch.com/blog/learning-sketch/" },
+  "procreate": { label: "Procreate Handbook (free)", url: "https://procreate.com/handbook" },
+  "capcut": { label: "CapCut tutorials on YouTube", url: "https://www.youtube.com/results?search_query=capcut+tutorial+beginners" },
+  "davinci resolve": { label: "Blackmagic Design training (free)", url: "https://www.blackmagicdesign.com/products/davinciresolve/training" },
+
+  // ── Branding & marketing ─────────────────────────────────────────────────
+  "branding": { label: "Coursera — Brand Management: Aligning Business, Brand & Behaviour (free audit)", url: "https://www.coursera.org/learn/brand-management" },
+  "brand design": { label: "Canva Design School — Building a Brand (free)", url: "https://www.canva.com/designschool/courses/building-a-brand/" },
+  "graphic design": { label: "Canva Design School — Graphic Design Basics (free)", url: "https://www.canva.com/designschool/courses/graphic-design-basics/" },
+  "visual design": { label: "Google UX Design Certificate — Visual Design (Coursera, free audit)", url: "https://www.coursera.org/learn/visual-design-ui-components-and-design-systems" },
+  "typography": { label: "Google Fonts Knowledge — Typography fundamentals (free)", url: "https://fonts.google.com/knowledge" },
+  "color theory": { label: "Coursera — Graphic Design Elements for Non-Designers (includes colour theory, free audit)", url: "https://www.coursera.org/learn/graphic-design-elements-for-non-designers" },
+  "ui design": { label: "Google UX Design Certificate (Coursera, free audit)", url: "https://www.coursera.org/professional-certificates/google-ux-design" },
+  "ux design": { label: "Google UX Design Certificate (Coursera, free audit)", url: "https://www.coursera.org/professional-certificates/google-ux-design" },
+  "ui/ux": { label: "Google UX Design Certificate (Coursera, free audit)", url: "https://www.coursera.org/professional-certificates/google-ux-design" },
+  "social media": { label: "Meta Blueprint — Social Media Marketing (free courses)", url: "https://www.facebook.com/business/learn/courses" },
+  "instagram": { label: "Meta Blueprint — Instagram Marketing (free)", url: "https://www.facebook.com/business/learn/instagram-courses" },
+  "content creation": { label: "HubSpot Academy — Content Marketing Certification (free)", url: "https://academy.hubspot.com/courses/content-marketing" },
+  "video editing": { label: "Adobe Premiere Pro — Official Free Tutorials", url: "https://www.adobe.com/learn/premiere-pro" },
+  "motion graphics": { label: "Adobe After Effects — Official Free Tutorials", url: "https://www.adobe.com/learn/after-effects" },
+
+  // ── Photography ──────────────────────────────────────────────────────────
+  "photography": { label: "Coursera — Photography Basics and Beyond (Michigan, free audit)", url: "https://www.coursera.org/specializations/photography-basics" },
+  "photo editing": { label: "Adobe Lightroom — Official Free Tutorials", url: "https://www.adobe.com/learn/lightroom" },
+  "portrait photography": { label: "Coursera — Photography Basics and Beyond — Portrait module (free audit)", url: "https://www.coursera.org/learn/fundamentals-of-exposure" },
+  "product photography": { label: "Shopify — Product Photography Guide (free)", url: "https://www.shopify.com/blog/product-photography" },
+  "photo retouching": { label: "Adobe Photoshop — Official Free Tutorials (includes retouching)", url: "https://www.adobe.com/learn/photoshop" },
+  "composition": { label: "Coursera — Photography Techniques: Light, Content, Sharing (free audit)", url: "https://www.coursera.org/learn/photography-techniques" },
+  "lighting": { label: "Coursera — Photography Basics and Beyond — Exposure & Light (free audit)", url: "https://www.coursera.org/learn/fundamentals-of-exposure" },
+  "studio lighting": { label: "Adobe — Portrait & Studio Lighting tutorials (free)", url: "https://www.adobe.com/learn/photoshop/lighting" },
+
+  // ── Marketing & analytics ────────────────────────────────────────────────
+  "digital marketing": { label: "Google Digital Garage — Fundamentals of Digital Marketing (free cert)", url: "https://learndigital.withgoogle.com/digitalgarage/course/digital-marketing" },
+  "seo": { label: "Google Search Central — SEO Starter Guide (free)", url: "https://developers.google.com/search/docs/fundamentals/seo-starter-guide" },
+  "google analytics": { label: "Google Skillshop — Google Analytics 4 Certification (free)", url: "https://skillshop.google.com/google-analytics" },
+  "email marketing": { label: "HubSpot Academy — Email Marketing Certification (free)", url: "https://academy.hubspot.com/courses/email-marketing" },
+  "copywriting": { label: "HubSpot Academy — Digital Marketing Certification (includes copywriting, free)", url: "https://academy.hubspot.com/courses/digital-marketing" },
 };
 
 const fallbackResource = (label) => ({
-  label: "Search free tutorials",
-  url: `https://www.google.com/search?q=${encodeURIComponent(`${label} free tutorial`)}`,
+  label: `YouTube — ${label} tutorials`,
+  url: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${label} tutorial`)}`,
 });
 
 /**

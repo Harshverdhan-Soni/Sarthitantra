@@ -286,6 +286,22 @@ export async function readProfileMd(handle, applicantFolder) {
 }
 
 /**
+ * Write a profile markdown string to the project root.
+ * - Main track  → profile.md
+ * - Other tracks → profile_<safe_name>.md  (e.g. profile_photography.md)
+ * Matches the naming convention used by fetch_profile.py.
+ */
+export async function writeProfileMd(handle, profileName, mdText) {
+  const safeName = profileName.toLowerCase().replace(/\s+/g, "_");
+  const fname = profileName === "Main" ? "profile.md" : `profile_${safeName}.md`;
+  const fh = await handle.getFileHandle(fname, { create: true });
+  const w = await fh.createWritable();
+  await w.write(mdText);
+  await w.close();
+  return fname;
+}
+
+/**
  * Parse a profile.md into a flat object of apply-form fields. Only keys that
  * are actually found are returned, so callers can fill blanks without
  * clobbering anything. Recognises the "- **Label:** value" markdown style.

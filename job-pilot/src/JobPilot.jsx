@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   Briefcase, SlidersHorizontal, Star, Search, Upload, Download,
@@ -13,7 +13,7 @@ import { extractText, analyzeResume, buildProfileMd } from "./resumeAnalyzer.js"
 import {
   FS_OK, pickFolder, ensurePermission, saveHandle, loadHandle,
   scanJobs, readTrackerBuffer, previewFile,
-  scanApplicantFiles, writeApplicantResume,
+  scanApplicantFiles, writeApplicantResume, removeApplicantFile, writeProfileMd,
 } from "./folderAccess.js";
 import { matchSkills, SKILLS, matchExistingSkillsForJob } from "./skillsCatalog.js";
 import {
@@ -24,14 +24,33 @@ import {
 const ACCENT = "#4f46e5";
 
 const DEFAULT_PREFS = {
-  targetTitles: ["Applied AI Research Scientist", "AI Researcher", "Generative AI Engineer", "Senior AI/ML Engineer", "Research Scientist", "Postdoctoral Researcher"],
-  locations: ["Remote", "Sweden", "Europe", "India"],
-  workModes: ["Remote", "Hybrid"],
-  mustHaves: ["GenAI / applied-AI focus", "Remote or EU sponsorship"],
-  niceToHaves: ["Multilingual NLP", "RAG / GraphRAG", "Agentic AI", "Conference / publication support"],
-  dealBreakers: ["No AI/ML component", "Onsite abroad without sponsorship", "Frontend-only role"],
+  targetTitles: [],
+  locations: [],
+  workModes: [],
+  mustHaves: [],
+  niceToHaves: [],
+  dealBreakers: [],
   scoreThreshold: 70,
   dailyCap: 8,
+};
+
+// Values that were hardcoded in older versions — strip them on load so they
+// never show up for new users or existing users with stale Supabase data.
+const LEGACY_PREF_VALUES = new Set([
+  "Relevant to my core skills",
+  "Onsite abroad without sponsorship",
+  "Frontend-only role",
+]);
+const cleanPrefs = (p) => {
+  if (!p) return p;
+  const strip = (arr) => (arr || []).filter((v) => !LEGACY_PREF_VALUES.has(v));
+  return {
+    ...p,
+    targetTitles: strip(p.targetTitles),
+    mustHaves:    strip(p.mustHaves),
+    niceToHaves:  strip(p.niceToHaves),
+    dealBreakers: strip(p.dealBreakers),
+  };
 };
 
 const STATUS_OPTIONS = ["Sourced", "Scored", "Tailored", "Queued", "Awaiting approval", "Submitted", "Skipped", "Interview", "Offer", "Rejected", "No response"];
@@ -227,10 +246,35 @@ function SkillChecklist({ skillIds, existingSkills, skillState, onToggle }) {
 }
 
 function ApplyPanel({ listing, profile, onConfirm, onCancel }) {
+  // Resolve each field from saved applyData first, then from profile — handling
+  // both the cloud schema (fullName, openToRelocation, preferredWorkMode,
+  // earliestStartDate, sponsorshipNeeded) and the local analysis schema (name,
+  // relocation, workMode, startDate, sponsorship).
+  const resolveField = (key) => {
+    const saved = listing.applyData?.[key];
+    if (saved !== undefined && saved !== null && String(saved).trim() !== "") return saved;
+    const p = profile;
+    switch (key) {
+      case "name":
+        return p.fullName || p.name || "";
+      case "relocation":
+        return p.openToRelocation != null
+          ? (p.openToRelocation ? "Yes" : "No")
+          : (p.relocation || "");
+      case "workMode":
+        return p.preferredWorkMode || p.workMode || "";
+      case "startDate":
+        return p.earliestStartDate || p.startDate || "";
+      case "sponsorship":
+        return p.sponsorshipNeeded != null
+          ? (p.sponsorshipNeeded ? "Yes — sponsorship required" : "No sponsorship required")
+          : (p.sponsorship || "");
+      default:
+        return (p[key] !== undefined && p[key] !== null) ? String(p[key]) : "";
+    }
+  };
   const initial = {};
-  APPLY_FIELDS.forEach(({ key }) => {
-    initial[key] = listing.applyData?.[key] ?? profile[key] ?? "";
-  });
+  APPLY_FIELDS.forEach(({ key }) => { initial[key] = resolveField(key); });
   const [fields, setFields] = useState(initial);
   const [attempted, setAttempted] = useState(false);
 
@@ -334,6 +378,10 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
   const [skillState, setSkillState] = useState(() => load(`jp_skills_${ns0}`, {}));
   const [cloudSynced, setCloudSynced] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  // Generation counter — incremented on every track switch AND after analyzeAndApply.
+  // The fetchAll callback checks this before writing state; if it changed mid-flight
+  // (because the user ran analyzeAndApply), the stale fetch result is discarded.
+  const fetchGen = useRef(0);
   const [analyzed, setAnalyzed] = useState(() => !!load("jp_profile_local", null));
   const [dirHandle, setDirHandle] = useState(null);
   const [folderName, setFolderName] = useState("");
@@ -341,6 +389,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
   const [savedHandle, setSavedHandle] = useState(null);
   const [preview, setPreview] = useState(null);
   const [folderFiles, setFolderFiles] = useState([]); // resumes in connected folder
+  const [justAnalyzedFile, setJustAnalyzedFile] = useState(null); // tracks which file was just re-analyzed (shows green "Analyzed")
   const [pendingResumeChoice, setPendingResumeChoice] = useState(null);
   const [applyPanelId, setApplyPanelId] = useState(null);
   const [search, setSearch] = useState("");
@@ -380,24 +429,68 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
     if (!user) return;
     const newNs = `${user.id}_${activeProfile}`;
     setNamespace(newNs);
-    // Load local cache for this profile immediately
-    setPrefs({ ...DEFAULT_PREFS, ...load(`jp_prefs_${newNs}`, {}) });
+    // Load local cache for this profile immediately (strip any legacy hardcoded values)
+    setPrefs({ ...DEFAULT_PREFS, ...cleanPrefs(load(`jp_prefs_${newNs}`, {})) });
     setListings(load(`jp_listings_${newNs}`, []));
     setProfile({ ...DEFAULT_PROFILE, ...load(`jp_profile_${newNs}`, {}) });
     setSkillState(load(`jp_skills_${newNs}`, {}));
     setAnalyzed(!!load(`jp_profile_${newNs}`, null));
     setCloudSynced(false);
-    // Then fetch from Supabase (cloud wins)
-    fetchAll(user.id, activeProfile).then(({ profile: cp, prefs: cpr, listings: cl, skillState: cs }) => {
-      if (cp)  { setProfile((p) => ({ ...p, ...cp })); save(`jp_profile_${newNs}`, { ...profile, ...cp }); setAnalyzed(true); }
-      if (cpr) { setPrefs((p) => ({ ...DEFAULT_PREFS, ...cpr })); save(`jp_prefs_${newNs}`, cpr); }
+    // Stamp the current generation — if analyzeAndApply runs while this fetch is
+    // in-flight, it will increment fetchGen.current and the callback below will
+    // discard its (now stale) results instead of overwriting the fresh analysis.
+    const gen = ++fetchGen.current;
+    // Then fetch from Supabase (cloud wins, unless a manual analysis ran mid-flight)
+    fetchAll(user.id, activeProfile).then(async ({ profile: cp, prefs: cpr, listings: cl, skillState: cs }) => {
+      // Discard if analyzeAndApply ran after this fetch started
+      if (gen !== fetchGen.current) return;
+
+      // Always overwrite local state with cloud — empty cloud data means a blank new track, not a fetch failure.
+      // This ensures switching tracks never shows the previous track's data.
+      const mergedProfile = { ...DEFAULT_PROFILE, ...(cp || {}) };
+      setProfile(mergedProfile);
+      save(`jp_profile_${newNs}`, mergedProfile);
+      // Mark analyzed only when real skill/personal data exists for this track
+      const hasRealData = cp && (cp.skillsByCategory || cp.fullName || cp.name);
+      setAnalyzed(!!hasRealData);
+
+      const cleaned = cleanPrefs(cpr || {});
+      setPrefs({ ...DEFAULT_PREFS, ...cleaned });
+      save(`jp_prefs_${newNs}`, cleaned);
+
       if (cl && cl.length > 0) { setListings(cl); save(`jp_listings_${newNs}`, cl); }
       if (cs)  { setSkillState(cs); save(`jp_skills_${newNs}`, cs); }
       setCloudSynced(true);
+
+      // Auto-analyze cloud resume if profile has one but fields aren't populated yet
+      const hasResume = mergedProfile?.masterResumeUrl;
+      const missingSkills = !mergedProfile?.skillsByCategory || Object.keys(mergedProfile.skillsByCategory || {}).length === 0;
+      const alreadyAnalyzed = !!load(`jp_profile_${newNs}`, null);
+      if (hasResume && missingSkills && !alreadyAnalyzed) {
+        try {
+          const resp = await fetch(mergedProfile.masterResumeUrl);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const ext = (mergedProfile.masterResumeName || "resume.pdf").split(".").pop();
+            const file = new File([blob], `resume.${ext}`, { type: blob.type });
+            await analyzeAndApply(file);
+          }
+        } catch { /* silent — resume auto-analysis is best-effort */ }
+      }
     });
   }, [user?.id, activeProfile]);
 
   useEffect(() => { if (FS_OK) loadHandle().then((h) => { if (h) setSavedHandle(h); }); }, []);
+
+  // Re-scan folder resumes whenever the active career track changes
+  useEffect(() => {
+    if (!dirHandle) return;
+    setFolderFiles([]);
+    setPendingResumeChoice(null);
+    scanApplicantFiles(dirHandle, activeProfile)
+      .then(setFolderFiles)
+      .catch(() => setFolderFiles([]));
+  }, [activeProfile, dirHandle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
   const updatePref = (k, v) => setPrefs((p) => ({ ...p, [k]: v }));
@@ -450,7 +543,12 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
     setAnalyzing(true);
     try {
       const text = await extractText(file);
-      if (!text || text.trim().length < 30) { flash("Couldn't read much text — try a DOCX or TXT export."); return false; }
+      const isPdf = file.name?.toLowerCase().endsWith(".pdf");
+      if (!text || text.trim().length < 50) {
+        if (isPdf) flash("This PDF appears to be a scanned image — no text could be extracted. Please upload a DOCX or TXT version for automatic field population.");
+        else flash("Couldn't read much text — try a DOCX or TXT version.");
+        return false;
+      }
       const a = analyzeResume(text);
       setProfile((p) => ({
         ...p,
@@ -460,15 +558,18 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
         portfolio: p.portfolio || a.contact.portfolio, scholar: p.scholar || a.contact.scholar,
         summary: p.summary || a.summary, skillsByCategory: a.skillsByCategory, seniority: a.seniority,
       }));
+      // Always replace all analyzer-driven pref arrays — never merge with stale saved values
       setPrefs((pr) => ({
         ...pr,
-        targetTitles: a.suggestedTitles.length ? a.suggestedTitles : pr.targetTitles,
-        locations: a.suggestedLocations.length ? a.suggestedLocations : pr.locations,
-        mustHaves: a.mustHaves.length ? a.mustHaves : pr.mustHaves,
-        niceToHaves: a.niceToHaves.length ? a.niceToHaves : pr.niceToHaves,
-        dealBreakers: a.dealBreakers.length ? a.dealBreakers : pr.dealBreakers,
+        targetTitles: a.suggestedTitles,
+        locations: a.suggestedLocations,
+        mustHaves: a.mustHaves,
+        niceToHaves: a.niceToHaves,
+        dealBreakers: a.dealBreakers,
       }));
       setAnalyzed(true);
+      // Cancel any in-flight fetchAll so it doesn't overwrite this fresh analysis
+      fetchGen.current++;
       flash(`Profile populated from ${file.name}.`);
       return true;
     } catch { flash("Analysis failed — try a DOCX or TXT file."); return false; }
@@ -531,18 +632,64 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
 
   const useResumeFromFolder = async (fileEntry) => {
     const file = await fileEntry.handle.getFile();
-    await analyzeAndApply(file);
+    const ok = await analyzeAndApply(file);
     setPendingResumeChoice(null);
+    if (ok) {
+      // Flash the "Analyzed" state on this file's Re-analyze button for 3 s
+      setJustAnalyzedFile(fileEntry.name);
+      setTimeout(() => setJustAnalyzedFile(null), 3000);
+    }
   };
 
-  const generateProfileMd = () => {
+  const removeResumeFromFolder = async (fileEntry) => {
+    if (!window.confirm(`Remove "${fileEntry.name}" from your folder? This deletes the file.`)) return;
+    await removeApplicantFile(dirHandle, activeProfile, fileEntry.name);
+    const updated = await scanApplicantFiles(dirHandle, activeProfile);
+    setFolderFiles(updated);
+    if (pendingResumeChoice === fileEntry.name) setPendingResumeChoice(null);
+    flash(`Removed ${fileEntry.name}.`);
+  };
+
+  const generateProfileMd = async () => {
+    // Build a normalised object that covers BOTH the Setup-schema keys (name, summary,
+    // workMode, startDate …) AND the ProfileEditor-schema keys (fullName, professionalSummary,
+    // preferredWorkMode, earliestStartDate …).  buildProfileMd accepts either set.
     const md = buildProfileMd({
-      ...profile, targetTitles: prefs.targetTitles, locations: prefs.locations,
+      ...profile,
+      // Prefer the explicitly-saved ProfileEditor values; fall back to Setup-schema equivalents
+      fullName:    profile.fullName    || profile.name || "",
+      email:       profile.email       || user?.email  || "",
+      phone:       profile.phone       || "",
+      linkedin:    profile.linkedin    || "",
+      github:      profile.github      || "",
+      portfolio:   profile.portfolio   || "",
+      scholar:     profile.scholar     || "",
+      summary:     profile.professionalSummary || profile.summary || "",
+      workMode:    profile.preferredWorkMode   || profile.workMode  || "",
+      startDate:   profile.earliestStartDate   || profile.startDate || "",
+      // Prefs
+      targetTitles: prefs.targetTitles, locations: prefs.locations,
       workModes: prefs.workModes, mustHaves: prefs.mustHaves, niceToHaves: prefs.niceToHaves,
       dealBreakers: prefs.dealBreakers, scoreThreshold: prefs.scoreThreshold, dailyCap: prefs.dailyCap,
     });
-    download("profile.md", md, "text/markdown");
-    flash("profile.md generated.");
+    if (dirHandle) {
+      // Write directly to the connected folder (e.g. profile.md or profile_photography.md)
+      try {
+        const fname = await writeProfileMd(dirHandle, activeProfile, md);
+        flash(`✓ ${fname} updated in your project folder.`);
+      } catch (e) {
+        flash("Could not write to folder — downloading instead.");
+        const safeName = activeProfile.toLowerCase().replace(/\s+/g, "_");
+        const fname = activeProfile === "Main" ? "profile.md" : `profile_${safeName}.md`;
+        download(fname, md, "text/markdown");
+      }
+    } else {
+      // No folder connected — fall back to browser download
+      const safeName = activeProfile.toLowerCase().replace(/\s+/g, "_");
+      const fname = activeProfile === "Main" ? "profile.md" : `profile_${safeName}.md`;
+      download(fname, md, "text/markdown");
+      flash(`${fname} downloaded.`);
+    }
   };
 
   const handleFile = async (e) => {
@@ -558,16 +705,31 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
     e.target.value = "";
   };
 
-  const mapRow = (r) => ({
-    id: r["Job ID"] || `J-${Math.random().toString(36).slice(2, 8)}`,
-    dateSourced: r["Date sourced"] || "", source: r["Source"] || "",
-    company: r["Company"] || "", role: r["Role"] || "",
-    location: r["Location"] || "", workMode: r["Work mode"] || "",
-    url: r["Job URL"] || "", score: Number(r["Fit score"]) || 0,
-    rationale: r["Score rationale"] || "", status: r["Status"] || "Scored",
-    dealBreaker: r["Deal-breaker?"] || "No", notes: r["Missing requirements / notes"] || "",
-    resumeFile: r["Resume file"] || "", coverFile: r["Cover letter file"] || "", starred: false,
-  });
+  const mapRow = (r) => {
+    // Support both the new tracker format ("Score", "Work Mode", "Notes") and
+    // the legacy format ("Fit score", "Work mode", "Missing requirements / notes")
+    // so the web app works with whichever version is in the connected folder.
+    const col = (...keys) => { for (const k of keys) { if (r[k] !== undefined && r[k] !== "") return r[k]; } return ""; };
+    const rawUrl = col("Job URL", "URL", "Apply URL", "Apply Link");
+    return {
+      id:          col("Job ID", "JobID", "ID") || `J-${Math.random().toString(36).slice(2, 8)}`,
+      dateSourced: col("Date sourced", "Date Sourced", "Sourced Date"),
+      source:      col("Source"),
+      company:     col("Company"),
+      role:        col("Role", "Title", "Job Title"),
+      location:    col("Location"),
+      workMode:    col("Work Mode", "Work mode", "WorkMode", "Mode"),
+      url:         rawUrl.startsWith("http") ? rawUrl : rawUrl ? `https://${rawUrl}` : "",
+      score:       Number(col("Score", "Fit score", "Fit Score", "fit_score")) || 0,
+      rationale:   col("Score rationale", "Rationale", "Score Rationale"),
+      status:      col("Status") || "Scored",
+      dealBreaker: col("Deal-breaker?", "Deal Breaker", "DealBreaker") || "No",
+      notes:       col("Notes", "Missing requirements / notes", "Missing Requirements"),
+      resumeFile:  col("Resume file", "Resume File"),
+      coverFile:   col("Cover letter file", "Cover Letter File"),
+      starred:     false,
+    };
+  };
 
   const normalizeJson = (r) => ({
     id: r.id || r.jobId || `J-${Math.random().toString(36).slice(2, 8)}`,
@@ -737,18 +899,137 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
 
         {tab === "setup" && (
           <div className="space-y-4">
-            {!dirHandle && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <h3 className="text-sm font-bold text-slate-700">Start from your resume</h3>
-                <p className="mb-4 mt-1 text-xs text-slate-500">Upload your resume (PDF, DOCX, or TXT). Job Pilot reads it locally in your browser, then suggests skills, target titles, and filters you can refine.</p>
-                <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-8 hover:border-indigo-400 hover:bg-indigo-50">
-                  {analyzing ? (
-                    <><Loader2 size={26} className="animate-spin text-indigo-500" /><span className="text-sm text-slate-500">Analyzing…</span></>
+
+            {/* ── Track context banner ─────────────────────────────────────── */}
+            {(() => {
+              const isMain = activeProfile === "Main";
+              const trackColor = isMain ? "indigo" : "violet";
+              const bgClass   = isMain ? "bg-indigo-600" : "bg-violet-600";
+              const badgeBg   = isMain ? "bg-indigo-500" : "bg-violet-500";
+              return (
+                <div className={`rounded-2xl ${bgClass} px-5 py-4 flex items-center justify-between`}>
+                  <div className="flex items-center gap-3">
+                    <span className={`rounded-full ${badgeBg} px-3 py-1 text-xs font-bold text-white tracking-wide uppercase`}>
+                      {activeProfile}
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-white">
+                        {analyzed ? "Profile ready" : "Track not set up yet"}
+                      </p>
+                      <p className="text-xs text-white/70">
+                        {analyzed
+                          ? "Preferences and skills are populated for this track."
+                          : "Upload a resume below to auto-fill your profile and preferences."}
+                      </p>
+                    </div>
+                  </div>
+                  {analyzed ? (
+                    <CheckCircle2 size={22} className="shrink-0 text-white/80" />
                   ) : (
-                    <><FileUp size={26} className="text-slate-400" /><span className="text-sm font-medium text-slate-600">Click to upload resume</span><span className="text-xs text-slate-400">PDF · DOCX · TXT</span></>
+                    <AlertCircle size={22} className="shrink-0 text-white/60" />
                   )}
-                  <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleResume} className="hidden" />
-                </label>
+                </div>
+              );
+            })()}
+
+            {/* ── Not-set-up full CTA (shown only when track has no profile) ── */}
+            {!analyzed && !analyzing && (
+              <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-6 text-center">
+                <FileUp size={32} className="mx-auto mb-3 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700 mb-1">
+                  No profile for <span className="text-indigo-600">{activeProfile}</span> track yet
+                </p>
+                <p className="text-xs text-slate-500 mb-4">
+                  Upload a resume and Job Pilot will automatically populate your skills, titles, locations, and preferences for this track.
+                </p>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {/* Cloud resume if available */}
+                  {profile.masterResumeName && profile.masterResumeUrl && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const resp = await fetch(profile.masterResumeUrl);
+                          if (!resp.ok) throw new Error("fetch failed");
+                          const blob = await resp.blob();
+                          const ext = profile.masterResumeName.split(".").pop();
+                          const file = new File([blob], profile.masterResumeName, { type: blob.type });
+                          await analyzeAndApply(file);
+                        } catch (e) { flash("Could not load cloud resume: " + e.message); }
+                      }}
+                      disabled={analyzing}
+                      className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: ACCENT }}
+                    >
+                      <Wand2 size={15} /> Use "{profile.masterResumeName}"
+                    </button>
+                  )}
+                  {/* Folder resume if connected and files exist */}
+                  {dirHandle && folderFiles.length > 0 && folderFiles.map((f) => (
+                    <button
+                      key={f.name}
+                      onClick={() => useResumeFromFolder(f)}
+                      disabled={analyzing}
+                      className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: ACCENT }}
+                    >
+                      <Wand2 size={15} /> Use "{f.name}"
+                    </button>
+                  ))}
+                  {/* Upload new */}
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-slate-50">
+                    <FileUp size={15} /> Upload resume
+                    <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleResume} className="hidden" />
+                  </label>
+                </div>
+                <p className="mt-3 text-xs text-slate-400">DOCX or TXT recommended · PDF supported</p>
+              </div>
+            )}
+            {!analyzed && analyzing && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 flex items-center justify-center gap-3">
+                <Loader2 size={20} className="animate-spin text-indigo-500" />
+                <p className="text-sm text-slate-600">Analyzing resume…</p>
+              </div>
+            )}
+
+            {!dirHandle && analyzed && profile.masterResumeName && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <h3 className="text-sm font-bold text-slate-700">Resume on file</h3>
+                <div className="mt-2 flex items-center justify-between rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText size={16} className="shrink-0 text-indigo-500" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-700 truncate">{profile.masterResumeName}</p>
+                      <p className="text-xs text-slate-500">Master resume · saved to cloud</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!profile.masterResumeUrl) { flash("Resume URL not available — try uploading again in My Profile."); return; }
+                      try {
+                        const resp = await fetch(profile.masterResumeUrl);
+                        if (!resp.ok) throw new Error("Could not fetch resume");
+                        const blob = await resp.blob();
+                        const ext = profile.masterResumeName.split(".").pop();
+                        const file = new File([blob], profile.masterResumeName, { type: blob.type });
+                        await analyzeAndApply(file);
+                      } catch (e) { flash("Could not load cloud resume: " + e.message); }
+                    }}
+                    disabled={analyzing}
+                    className="ml-3 shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    style={{ background: ACCENT }}
+                  >
+                    {analyzing ? <Loader2 size={13} className="animate-spin" /> : <RotateCw size={13} />}
+                    {analyzing ? "Analyzing…" : "Re-analyze"}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-400">
+                  Using a different resume for this track?{" "}
+                  <label className="cursor-pointer font-medium text-indigo-600 hover:underline">
+                    Upload another
+                    <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleResume} className="hidden" />
+                  </label>
+                  {" "}· DOCX gives the best extraction.
+                </p>
               </div>
             )}
 
@@ -778,18 +1059,54 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                     </p>
                   </div>
                   {folderFiles.length === 0 ? (
-                    <p className="mb-3 text-sm text-slate-400 italic">No resumes in this track yet — upload one below.</p>
+                    <p className="mb-3 text-sm text-slate-400 italic">No resumes in this track's folder yet — upload one below.</p>
                   ) : (
                     <div className="mb-3 space-y-2">
-                      {folderFiles.map((f) => (
-                        <div key={f.name} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                          <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700"><FileText size={14} className="shrink-0" /> <span className="truncate">{f.name}</span></span>
-                          <div className="flex shrink-0 items-center gap-3">
-                            <button onClick={() => openPreview(f)} className="text-xs font-medium text-indigo-600 hover:underline">View</button>
-                            <button onClick={() => useResumeFromFolder(f)} className="text-xs font-medium text-emerald-600 hover:underline">Use to populate profile</button>
+                      {folderFiles.map((f) => {
+                        const isPdf = f.name.toLowerCase().endsWith(".pdf");
+                        return (
+                          <div key={f.name} className="rounded-lg border border-slate-200 px-3 py-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex min-w-0 flex-col">
+                                <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+                                  <FileText size={14} className="shrink-0" />
+                                  <span className="truncate">{f.name}</span>
+                                </span>
+                                {isPdf && <span className="mt-0.5 text-[10px] text-amber-600">PDF: text-based PDFs work best — upload DOCX for guaranteed extraction</span>}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-3 ml-3">
+                                <button onClick={() => openPreview(f)} className="text-xs font-medium text-indigo-600 hover:underline">View</button>
+                                {analyzed && (
+                                  justAnalyzedFile === f.name ? (
+                                    <span className="text-xs font-medium text-emerald-600">✓ Analyzed</span>
+                                  ) : (
+                                    <button
+                                      onClick={() => useResumeFromFolder(f)}
+                                      disabled={analyzing}
+                                      className="text-xs font-medium text-amber-600 hover:underline disabled:opacity-40"
+                                    >
+                                      {analyzing ? "Analyzing…" : "Re-analyze"}
+                                    </button>
+                                  )
+                                )}
+                                <button onClick={() => removeResumeFromFolder(f)} className="text-xs font-medium text-rose-500 hover:underline">Remove</button>
+                              </div>
+                            </div>
+                            {/* Primary CTA when not yet analyzed */}
+                            {!analyzed && (
+                              <button
+                                onClick={() => useResumeFromFolder(f)}
+                                disabled={analyzing}
+                                className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-50"
+                                style={{ background: ACCENT }}
+                              >
+                                {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                                {analyzing ? "Analyzing…" : "Use to populate profile"}
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {pendingResumeChoice && (
@@ -835,7 +1152,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                   <p className="mt-1 text-xs text-slate-500">Max prepared per run.</p>
                 </div>
               </div>
-              <p className="mt-5 border-t border-slate-200 pt-5 text-xs text-slate-500">These preferences are automatically included as Section 9 when you <span className="font-semibold">Generate &amp; download profile.md</span> below.</p>
+              <p className="mt-5 border-t border-slate-200 pt-5 text-xs text-slate-500">These preferences are included in Section 9 when you click <span className="font-semibold">Update profile.md</span> below.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button onClick={exportPrefsJson} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"><Download size={16} /> Export JSON</button>
                 <button onClick={() => setPrefs(DEFAULT_PREFS)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50"><RotateCcw size={16} /> Reset defaults</button>
@@ -896,13 +1213,22 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                   <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Suggested target titles, locations, and deal-breakers were applied to the preferences panel above.</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <h3 className="mb-1 text-sm font-bold text-slate-700">Generate profile.md</h3>
+                  <h3 className="mb-1 text-sm font-bold text-slate-700">
+                    {activeProfile === "Main" ? "Update profile.md" : `Update profile_${activeProfile.toLowerCase().replace(/\s+/g, "_")}.md`}
+                  </h3>
                   <p className="mb-3 text-xs text-slate-500">
-                    Manual fallback only — <code className="rounded bg-slate-100 px-1">fetch_profile.py</code> syncs this automatically at the start of every Cowork session.
-                    Use this button only if the script is unavailable or you want to inspect the file.
+                    Writes your current Setup changes — skills, preferences, personal details — directly to the{" "}
+                    <code className="rounded bg-slate-100 px-1">
+                      {activeProfile === "Main" ? "profile.md" : `profile_${activeProfile.toLowerCase().replace(/\s+/g, "_")}.md`}
+                    </code>{" "}
+                    file in your connected folder so Cowork picks them up immediately.
+                    {!dirHandle && " Connect your project folder above to write directly; otherwise the file will be downloaded."}
                   </p>
                   <button onClick={generateProfileMd} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: ACCENT }}>
-                    <Wand2 size={16} /> Generate &amp; download profile.md
+                    {dirHandle ? <RefreshCw size={16} /> : <Download size={16} />}
+                    {dirHandle
+                      ? `Update ${activeProfile === "Main" ? "profile.md" : `profile_${activeProfile.toLowerCase().replace(/\s+/g, "_")}.md`}`
+                      : "Download profile.md"}
                   </button>
                 </div>
               </>
@@ -1002,7 +1328,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                             <select value={l.status} onChange={(e) => editListing(l.id, { status: e.target.value })} className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(l.status)} border-0 focus:outline-none`}>
                               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                             </select>
-                            {l.url && <a href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline"><ExternalLink size={12} /> View posting</a>}
+                            {l.url && <a href={l.url.startsWith("http") ? l.url : `https://${l.url}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline"><ExternalLink size={12} /> View posting</a>}
                             {rFile && <button onClick={() => openPreview(rFile)} className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100"><Eye size={12} /> Resume</button>}
                             {cFile && <button onClick={() => openPreview(cFile)} className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-100"><Eye size={12} /> Cover</button>}
                             {!dirHandle && (l.resumeFile || l.coverFile) && <span className="inline-flex items-center gap-1 text-xs text-slate-400"><FileText size={12} /> {[l.resumeFile, l.coverFile].filter(Boolean).join(", ")}</span>}
@@ -1056,34 +1382,39 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
               activeProfile={activeProfile}
               onProfileSwitch={onProfileSwitch}
               profile={(() => {
-                // Map JobPilot's internal profile + prefs shapes to the ProfileEditor schema
+                // Map JobPilot's internal profile + prefs shapes to the ProfileEditor schema.
+                // Cloud data (career_profiles.data) is merged into `profile` state by fetchAll,
+                // so ProfileEditor-schema fields (fullName, education, masterResumeUrl, etc.)
+                // live alongside Setup-schema fields (name, summary, skillsByCategory).
+                // We prefer the ProfileEditor-schema value when set, falling back to the
+                // Setup-schema equivalent so freshly-analyzed resumes still populate the form.
                 return {
                   onboardingComplete: true,
-                  fullName:       profile.name || "",
+                  fullName:       profile.fullName || profile.name || "",
                   email:          profile.email || user?.email || "",
                   phone:          profile.phone || "",
                   location:       profile.location || "",
-                  openToRelocation: profile.relocation?.toLowerCase().startsWith("y") ?? true,
-                  relocationNotes:  profile.relocation || "",
-                  preferredWorkMode: profile.workMode || "Remote",
+                  openToRelocation: profile.openToRelocation ?? (profile.relocation?.toLowerCase().startsWith("y") ?? true),
+                  relocationNotes:  profile.relocationNotes || profile.relocation || "",
+                  preferredWorkMode: profile.preferredWorkMode || profile.workMode || "Remote",
                   workAuth:         profile.workAuth || "",
-                  sponsorshipNeeded: !!profile.sponsorship,
+                  sponsorshipNeeded: profile.sponsorshipNeeded ?? !!profile.sponsorship,
                   noticePeriod:     profile.noticePeriod || "",
                   currentCtc:       profile.currentCtc || "",
                   expectedCtc:      profile.expectedCtc || "",
-                  earliestStartDate: profile.startDate || "",
-                  currentlyEmployed: true,
-                  currentTitle:     "",
-                  currentOrg:       "",
-                  professionalSummary: profile.summary || "",
-                  skillsGenAI:  (profile.skillsByCategory?.["Generative AI & LLMs"] ?? []),
-                  skillsML:     (profile.skillsByCategory?.["ML & AI Research"] ?? []),
-                  skillsDev:    (profile.skillsByCategory?.["Development & Databases"] ?? []),
-                  skillsDomains:(profile.skillsByCategory?.["Domains & Other"] ?? []),
+                  earliestStartDate: profile.earliestStartDate || profile.startDate || "",
+                  currentlyEmployed: profile.currentlyEmployed ?? true,
+                  currentTitle:     profile.currentTitle || "",
+                  currentOrg:       profile.currentOrg || "",
+                  professionalSummary: profile.professionalSummary || profile.summary || "",
+                  skillsGenAI:  (profile.skillsGenAI ?? profile.skillsByCategory?.["Generative AI & LLMs"] ?? []),
+                  skillsML:     (profile.skillsML ?? profile.skillsByCategory?.["ML & AI Research"] ?? []),
+                  skillsDev:    (profile.skillsDev ?? profile.skillsByCategory?.["Development & Databases"] ?? []),
+                  skillsDomains:(profile.skillsDomains ?? profile.skillsByCategory?.["Domains & Other"] ?? []),
                   portfolio:    profile.portfolio || "",
                   linkedin:     profile.linkedin || "",
                   github:       profile.github || "",
-                  youtube:      "",
+                  youtube:      profile.youtube || "",
                   scholar:      profile.scholar || "",
                   targetTitles:     prefs.targetTitles || [],
                   targetLocations:  prefs.locations || [],
@@ -1092,22 +1423,26 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                   dealBreakers:     prefs.dealBreakers || [],
                   scoreThreshold:   prefs.scoreThreshold ?? 70,
                   dailyCap:         prefs.dailyCap ?? 8,
-                  masterResumeUrl:  "",
-                  masterResumeName: "",
-                  education:        "",
-                  currentRoleHighlights: "",
-                  research:         "",
-                  standardAnswers:  "",
+                  masterResumeUrl:  profile.masterResumeUrl || "",
+                  masterResumeName: profile.masterResumeName || "",
+                  education:        profile.education || "",
+                  currentRoleHighlights: profile.currentRoleHighlights || "",
+                  research:         profile.research || "",
+                  standardAnswers:  profile.standardAnswers || "",
                 };
               })()}
               onSave={(updated) => {
-                // Write back into internal profile + prefs
+                // Write back into internal profile state — keep BOTH schema variants
+                // in sync so the mapping above always has the right values regardless
+                // of whether the user last came through setup/analysis (Setup-schema)
+                // or edited directly in My Profile (ProfileEditor-schema).
                 setProfile((p) => ({
                   ...p,
-                  name:     updated.fullName,
-                  email:    updated.email,
-                  phone:    updated.phone,
-                  location: updated.location,
+                  // Setup-schema mirrors (for profile.md generation & apply form)
+                  name:         updated.fullName,
+                  email:        updated.email,
+                  phone:        updated.phone,
+                  location:     updated.location,
                   relocation:   updated.openToRelocation ? `Yes — ${updated.relocationNotes || "open to relocation"}` : "No",
                   workMode:     updated.preferredWorkMode,
                   workAuth:     updated.workAuth,
@@ -1127,6 +1462,28 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                     "Development & Databases": updated.skillsDev,
                     "Domains & Other":      updated.skillsDomains,
                   },
+                  // ProfileEditor-schema (pass-through so they survive re-render)
+                  fullName:          updated.fullName,
+                  openToRelocation:  updated.openToRelocation,
+                  relocationNotes:   updated.relocationNotes,
+                  preferredWorkMode: updated.preferredWorkMode,
+                  sponsorshipNeeded: updated.sponsorshipNeeded,
+                  earliestStartDate: updated.earliestStartDate,
+                  currentlyEmployed: updated.currentlyEmployed,
+                  currentTitle:      updated.currentTitle,
+                  currentOrg:        updated.currentOrg,
+                  professionalSummary: updated.professionalSummary,
+                  skillsGenAI:  updated.skillsGenAI,
+                  skillsML:     updated.skillsML,
+                  skillsDev:    updated.skillsDev,
+                  skillsDomains: updated.skillsDomains,
+                  youtube:           updated.youtube,
+                  masterResumeUrl:   updated.masterResumeUrl,
+                  masterResumeName:  updated.masterResumeName,
+                  education:         updated.education,
+                  currentRoleHighlights: updated.currentRoleHighlights,
+                  research:          updated.research,
+                  standardAnswers:   updated.standardAnswers,
                 }));
                 setPrefs((prev) => ({
                   ...prev,

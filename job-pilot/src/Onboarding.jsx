@@ -5,7 +5,7 @@
 import React, { useState, useRef } from "react";
 import JSZip from "jszip";
 import { supabase } from "./supabase.js";
-import { saveProfile } from "./db.js";
+import { saveCareerProfile } from "./db.js";
 
 // ── Inline Tags Input ─────────────────────────────────────────────────────────
 function TagInput({ value = [], onChange, placeholder }) {
@@ -175,7 +175,11 @@ export default function Onboarding({ user, onComplete }) {
       const uploaded = await uploadResume();
       if (!uploaded) { setSaving(false); return; }
       const finalProfile = { ...profile, onboardingComplete: true };
-      await saveProfile(user.id, finalProfile);
+      // Save to career_profiles (Main track) with prefs split into their own column
+      const PREF_KEYS = ["targetTitles", "targetLocations", "mustHaves", "niceToHaves", "dealBreakers", "scoreThreshold", "dailyCap"];
+      const prefs = Object.fromEntries(PREF_KEYS.map((k) => [k, finalProfile[k] ?? []]));
+      const profileData = Object.fromEntries(Object.entries(finalProfile).filter(([k]) => !PREF_KEYS.includes(k)));
+      await saveCareerProfile(user.id, "Main", profileData, prefs);
       onComplete(finalProfile);
     } catch (e) {
       setError("Failed to save: " + e.message);

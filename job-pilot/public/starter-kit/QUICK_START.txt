@@ -6,20 +6,60 @@ Website: https://sarthitantra.netlify.app
 
 WHAT IS IN THIS FOLDER
 ──────────────────────────────────────────────────────────────────
-  sarthitantra_config.json     Your secure connection to the cloud
-  folder-instructions.md       Tells Claude Cowork what to do
-  scripts/fetch_profile.py     Syncs your profile from the cloud
-  master/                      Your master resume is downloaded here
-  jobs/                        Cowork creates one subfolder per job
+  sarthitantra_config.json          Your secure connection to the cloud
+  folder-instructions.md            Tells Claude Cowork what to do
+  applications_tracker.xlsx         Your job application log (starts empty)
+  scripts/fetch_profile.py          Syncs your profile from the cloud
+  scripts/sync_jobs.py              Pushes tracker rows to the cloud DB
+  scripts/apply_approved.py         Generates apply_queue.json for pre-fill
+  scripts/mark_applied.py           Records your submitted applications
+  scripts/cancel_application.py     Cancels a queued application
+  scripts/delete_job.py             Permanently removes a job row
+  scripts/pending_confirmations.py  Lists roles waiting for your submit
+  master/                           Your master resume is downloaded here
+  jobs/                             Cowork creates one subfolder per job
 
 
-STEP 1  Install the Python dependency  (one-time setup)
+STEP 1  Install Python dependencies  (one-time setup)
 ──────────────────────────────────────────────────────────────────
 Open a terminal / Command Prompt and run:
 
-    pip install supabase
+    pip install supabase openpyxl
 
-That's the only dependency needed.
+These are the only dependencies needed.
+
+
+STEP 1b  Connect to the cloud  (one-time setup, required)
+──────────────────────────────────────────────────────────────────
+Run this in your terminal ONCE from this folder:
+
+    python scripts/fetch_profile.py
+
+Your sarthitantra_config.json contains a permanent API token that
+identifies you — NO password needed, no expiry, works for Google
+accounts and email/password accounts alike.
+
+On success you'll see:
+    ✅  Connected as you@example.com (permanent API token — no password needed)
+    ✅  Profile sync complete
+
+This also writes active_track.json (tells Cowork which career track
+is active) and downloads your master resume into master/.
+
+IMPORTANT: Run the SQL migration first (see below) if this is a
+fresh Supabase project.
+
+
+STEP 1c  Run the SQL migration  (first-time only, if prompted)
+──────────────────────────────────────────────────────────────────
+If step 1b fails with "API token auth failed — SQL migration hasn't
+been run yet", open your Supabase project → SQL Editor and run:
+
+    supabase_cli_auth.sql
+
+(This file is in your JobFinder project root, not this folder.)
+It creates the permanent API token table and two helper functions.
+You only ever need to do this once.
 
 
 STEP 2  Connect this folder to Claude Cowork
@@ -59,13 +99,10 @@ STEP 4  Updating your profile
 Edit your profile anytime at: https://sarthitantra.netlify.app
 Go to the "My Profile" tab, make changes, and save.
 
-Your updates sync to this folder automatically at the start of
-every Cowork run. To sync manually at any time:
+Your updates sync to this folder at the start of every Cowork
+run. To sync manually at any time:
 
     python scripts/fetch_profile.py
-
-(On first run it asks for your Sarthitantra password once, then
-saves a token so future runs are fully automatic.)
 
 
 STEP 5  Marking applications as submitted

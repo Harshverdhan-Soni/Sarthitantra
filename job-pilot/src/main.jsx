@@ -5,7 +5,7 @@ import Auth from "./Auth.jsx";
 import Admin from "./Admin.jsx";
 import Onboarding from "./Onboarding.jsx";
 import { supabase } from "./supabase.js";
-import { fetchProfile, fetchDefaultProfile, listProfiles } from "./db.js";
+import { fetchProfile, fetchDefaultProfile, listProfiles, getActiveTrack, setActiveTrack } from "./db.js";
 import "./index.css";
 
 // ── Simple hash-based router ─────────────────────────────────────────────────
@@ -44,10 +44,15 @@ function App() {
         alert("Your account has been suspended. Please contact the administrator.");
         return;
       }
-      // Check onboarding status via career_profiles (falls back to user_profiles)
-      const careerRow = await fetchDefaultProfile(session.user.id);
+      // Restore active track from user_settings (written on every track switch).
+      // Falls back to the default profile name if no setting saved yet.
+      const [savedTrack, careerRow] = await Promise.all([
+        getActiveTrack(session.user.id),
+        fetchDefaultProfile(session.user.id),
+      ]);
       const profile = careerRow?.data ?? (await fetchProfile(session.user.id));
-      if (careerRow?.profile_name) setActiveProfile(careerRow.profile_name);
+      // savedTrack wins over is_default because it reflects the user's last selection
+      setActiveProfile(savedTrack ?? careerRow?.profile_name ?? "Main");
       setNeedsOnboarding(!profile?.onboardingComplete);
       setProfileChecked(true);
       setSession(session);
@@ -120,7 +125,11 @@ function App() {
       onLogout={handleLogout}
       onAdmin={() => { window.location.hash = "admin"; }}
       activeProfile={activeProfile}
-      onProfileSwitch={setActiveProfile}
+      onProfileSwitch={(name) => {
+        setActiveProfile(name);
+        // Persist to Supabase so fetch_profile.py picks up the right track next run
+        setActiveTrack(session.user.id, name);
+      }}
     />
   );
 }

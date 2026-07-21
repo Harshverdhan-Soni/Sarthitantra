@@ -4,6 +4,7 @@
  * Uses the same profile schema as Onboarding.jsx.
  */
 import React, { useState, useRef, useEffect } from "react";
+import JSZip from "jszip";
 import { supabase } from "./supabase.js";
 import { saveCareerProfile, listProfiles, createCareerProfile, deleteCareerProfile, setDefaultProfile } from "./db.js";
 
@@ -195,47 +196,23 @@ function CareerTrackBar({ userId, activeProfile, onSwitch }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ProfileEditor({ user, profile, onSave, activeProfile = "Main", onProfileSwitch }) {
   const [p, setP] = useState({ ...profile });
-  const [resumeFile, setResumeFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  // Re-initialize form state whenever the active career track changes
+  useEffect(() => {
+    setP({ ...profile });
+    setError("");
+    setSaved(false);
+  }, [activeProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const set = (key, val) => setP((prev) => ({ ...prev, [key]: val }));
-
-  const uploadResume = async () => {
-    if (!resumeFile) return;
-    setUploading(true);
-    try {
-      const ext = resumeFile.name.split(".").pop().toLowerCase();
-      const path = `${user.id}/master_resume.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from("resumes")
-        .upload(path, resumeFile, { upsert: true });
-      if (uploadError) throw uploadError;
-
-      const { data: signed } = await supabase.storage
-        .from("resumes")
-        .createSignedUrl(path, 60 * 60 * 24 * 365);
-
-      setP((prev) => ({
-        ...prev,
-        masterResumeUrl: signed?.signedUrl ?? "",
-        masterResumeName: resumeFile.name,
-      }));
-      setResumeFile(null);
-    } catch (e) {
-      setError("Upload failed: " + e.message);
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const save = async () => {
     setSaving(true);
     setError("");
     try {
-      if (resumeFile) await uploadResume();
       const updated = { ...p, onboardingComplete: true };
       // Extract preferences to store separately in career_profiles
       const { targetTitles, targetLocations, mustHaves, niceToHaves, dealBreakers, scoreThreshold, dailyCap, ...profileData } = updated;
@@ -254,17 +231,95 @@ export default function ProfileEditor({ user, profile, onSave, activeProfile = "
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  const downloadConfig = () => {
-    const blob = new Blob([JSON.stringify({
-      supabase_url: SUPABASE_URL,
-      supabase_key: SUPABASE_KEY,
-      user_email: user?.email ?? "",
-      user_id: user?.id ?? "",
-    }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "sarthitantra_config.json"; a.click();
-    URL.revokeObjectURL(url);
+  const [kitBuilding, setKitBuilding] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  const copyPrompt = (key, text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(""), 2000);
+    });
+  };
+
+  const downloadStarterKit = async () => {
+    setKitBuilding(true);
+    try {
+      const zip = new JSZip();
+
+      // 1. Dynamic config — generate/retrieve a permanent API token stored in
+      //    Supabase (user_api_tokens table). This token never rotates or expires
+      //    on its own, works for Google OAuth and email/password alike, and is
+      //    the only credential fetch_profile.py and sync_jobs.py need.
+      let apiToken = "";
+      try {
+        const { data: existing } = await supabase
+          .from("user_api_tokens")
+          .select("api_token")
+          .eq("user_id", user?.id)
+          .maybeSingle();
+
+        if (existing?.api_token) {
+          apiToken = existing.api_token;
+        } else {
+          // No token yet — insert a new row; the DEFAULT generates the token server-side.
+          const { data: inserted } = await supabase
+            .from("user_api_tokens")
+            .insert({ user_id: user?.id })
+            .select("api_token")
+            .single();
+          apiToken = inserted?.api_token ?? "";
+        }
+      } catch { /* non-fatal — CLI will show a clear error */ }
+
+      const config = {
+        supabase_url: SUPABASE_URL,
+        supabase_key: SUPABASE_KEY,
+        user_email:   user?.email ?? "",
+        user_id:      user?.id ?? "",
+        api_token:    apiToken,  // permanent, non-rotating; works for all auth providers
+      };
+      zip.file("sarthitantra_config.json", JSON.stringify(config, null, 2));
+
+      // 2. Static starter-kit files (served from /starter-kit/ in public/)
+      const STATIC = [
+        "folder-instructions.md",
+        "QUICK_START.txt",
+        "applications_tracker.xlsx",
+        "scripts/fetch_profile.py",
+        "scripts/sync_jobs.py",
+        "scripts/apply_approved.py",
+        "scripts/mark_applied.py",
+        "scripts/cancel_application.py",
+        "scripts/delete_job.py",
+        "scripts/pending_confirmations.py",
+        "master/.gitkeep",
+        "jobs/.gitkeep",
+      ];
+      await Promise.all(STATIC.map(async (path) => {
+        try {
+          const res = await fetch(`/starter-kit/${path}`);
+          if (!res.ok) return;
+          // Binary files (xlsx) need arrayBuffer; text files use text()
+          if (path.endsWith(".xlsx")) {
+            const buf = await res.arrayBuffer();
+            zip.file(path, buf);
+          } else {
+            const text = await res.text();
+            zip.file(path, text);
+          }
+        } catch { /* skip missing files gracefully */ }
+      }));
+
+      const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Sarthitantra_StarterKit.zip"; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Could not build starter kit: " + e.message);
+    } finally {
+      setKitBuilding(false);
+    }
   };
 
   return (
@@ -446,43 +501,78 @@ export default function ProfileEditor({ user, profile, onSave, activeProfile = "
         </Field>
       </section>
 
-      {/* ── Master Resume ─────────────────────────────────────────────── */}
+      {/* ── Cowork Prompts ────────────────────────────────────────────── */}
       <section>
-        <SectionTitle>Master Resume</SectionTitle>
-        <div className="space-y-3">
-          {p.masterResumeUrl && (
-            <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg p-3">
-              <span className="text-green-600 text-lg">📄</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-800 truncate">{p.masterResumeName || "master_resume"}</p>
-                <a href={p.masterResumeUrl} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:underline">View / Download</a>
+        <SectionTitle>Cowork Prompt</SectionTitle>
+        <p className="text-sm text-slate-500 mb-4">
+          Open a Cowork session with your JobFinder folder connected, paste this prompt, and Claude will run the complete job search workflow automatically.
+        </p>
+        {(() => {
+          const PROMPT = `Read folder-instructions.md in this folder first, then execute the following steps in order. Do not skip any step.
+
+━━━ PART A — APPLY APPROVED JOBS (do this before anything else) ━━━
+
+Run: python scripts/apply_approved.py
+This outputs a list of jobs the user has already approved for application.
+
+For EACH job in that output, you MUST take these browser actions right now:
+  a. Use your Claude in Chrome browser tools to open a NEW browser tab.
+  b. Navigate to the job's application URL (use the official company ATS page — if the stored URL is an aggregator like LinkedIn or Internshala, first search the web for the company's official careers page and navigate there instead).
+  c. Read the form fields on the page.
+  d. Fill in EVERY visible field using the data from profile.md (name, email, phone, location, LinkedIn, work authorization, notice period, expected CTC, relocation preference, work mode preference, etc.). Use the tailored resume from jobs/<Company>_<Role>/ if it exists; otherwise upload the master resume.
+  e. If the form has any field not covered by profile.md, leave it blank and note it.
+  f. STOP — do not click Submit, Apply, or Send under any circumstances.
+  g. Take a screenshot of the filled form.
+  h. Keep this tab open for the user to review and submit manually.
+
+Repeat steps a–h for every approved job before moving to Part B.
+
+━━━ PART B — SOURCE AND PROCESS NEW ROLES ━━━
+
+1. Sync profile: run scripts/fetch_profile.py to pull the latest cloud profile. Read active_track.json to know which tracker and profile file to use for all steps below.
+2. Source new job listings matching my target titles, locations, and work preferences (web search + job-alert emails).
+3. Deduplicate — skip any URL or Company+Role already in the tracker.
+4. Score each new role 0–100 against my profile. Mark deal-breakers as Skipped. Leave below-threshold roles as Scored.
+5. Eligibility check — mark Eligible = Yes only when all must-haves from profile.md Section 9 are met.
+6. Tailor resume and cover letter for the top 2 highest-scoring eligible roles. Save to jobs/<Company>_<Role>/.
+7. For each newly tailored role, repeat the browser actions from Part A (open new tab → navigate to official ATS → fill form → stop before Submit → screenshot).
+8. Update the tracker: every row gets status, score, rationale, file names, and today's date.
+9. Run scripts/sync_jobs.py to push tracker to the cloud.
+10. Run scripts/pending_confirmations.py and show its output.
+11. One-time setup: create a scheduled task with ID "sarthitantra-daily-pipeline", cron "0 11 * * *" (11:00 AM daily). Skip this step silently if that task ID already exists.
+
+━━━ FINAL SUMMARY ━━━
+
+Show one consolidated report:
+• Jobs applied for from Part A (with screenshots of each filled form)
+• New roles sourced, scored, and their scores
+• Roles tailored and applied for in Part B (with screenshots)
+• Roles skipped (deal-breaker or below threshold)
+• All jobs currently waiting for the user to click Submit
+
+End with: "All forms are filled and waiting in open browser tabs. Please review each tab and click Submit yourself. Once you've submitted, tell me the Job ID (e.g. 'I submitted JOB-042') and I'll mark it as Submitted in the tracker."
+
+GUARDRAILS: Never click Submit or Apply. Never enter passwords, OTPs, or government IDs. Never apply to deal-breakers. Never invent experience. Respect the daily cap in profile.md Section 9.`;
+          return (
+            <div className="border border-indigo-200 rounded-xl p-4 bg-indigo-50">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-indigo-900">Full workflow run</p>
+                <button
+                  type="button"
+                  onClick={() => copyPrompt("main", PROMPT)}
+                  className={`shrink-0 text-xs px-3 py-1.5 rounded-lg font-medium transition ${
+                    copied === "main"
+                      ? "bg-green-100 text-green-700 border border-green-200"
+                      : "bg-white text-indigo-700 border border-indigo-300 hover:bg-indigo-100"
+                  }`}
+                >
+                  {copied === "main" ? "✓ Copied" : "Copy prompt"}
+                </button>
               </div>
-              <label className="text-xs text-indigo-600 hover:underline cursor-pointer">
-                Replace
-                <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
-              </label>
+              <pre className="text-xs text-indigo-900 bg-white border border-indigo-100 rounded-lg p-3 whitespace-pre-wrap leading-relaxed font-sans">{PROMPT}</pre>
             </div>
-          )}
-          {!p.masterResumeUrl && (
-            <label className="block border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-6 text-center cursor-pointer transition-colors">
-              <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
-              {resumeFile ? (
-                <p className="text-sm text-slate-700">✅ {resumeFile.name}</p>
-              ) : (
-                <p className="text-sm text-slate-500">⬆️ Click to upload PDF or DOCX (max 5 MB)</p>
-              )}
-            </label>
-          )}
-          {resumeFile && (
-            <div className="flex items-center gap-3">
-              <p className="text-sm text-slate-600">Selected: {resumeFile.name}</p>
-              <button type="button" onClick={uploadResume} disabled={uploading}
-                className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700 transition disabled:opacity-60">
-                {uploading ? "Uploading…" : "Upload now"}
-              </button>
-            </div>
-          )}
-        </div>
+          );
+        })()}
       </section>
 
       {/* ── Cowork Config ─────────────────────────────────────────────── */}
@@ -490,12 +580,12 @@ export default function ProfileEditor({ user, profile, onSave, activeProfile = "
         <SectionTitle>Cowork Desktop Setup</SectionTitle>
         <div className="bg-slate-50 rounded-xl p-4 space-y-3">
           <p className="text-sm text-slate-600">
-            Save this config file in your local JobFinder folder. The <code className="bg-white px-1 rounded border text-xs">fetch_profile.py</code> script
-            uses it to download your profile before each run.
+            Download the complete starter kit — your personal config, <code className="bg-white px-1 rounded border text-xs">folder-instructions.md</code>,
+            scripts, and folder structure — in one zip. Extract it to create or restore your local JobFinder folder at any time.
           </p>
-          <button type="button" onClick={downloadConfig}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition">
-            ⬇️ Download sarthitantra_config.json
+          <button type="button" onClick={downloadStarterKit} disabled={kitBuilding}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition disabled:opacity-60">
+            {kitBuilding ? "⏳ Building zip…" : "⬇️ Download Full Starter Kit"}
           </button>
         </div>
       </section>

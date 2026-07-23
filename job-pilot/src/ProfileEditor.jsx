@@ -541,35 +541,38 @@ For EACH job in that output, you MUST take these browser actions right now:
   f. STOP — do not click Submit, Apply, or Send under any circumstances.
   g. Take a screenshot of the filled form.
   h. Keep this tab open for the user to review and submit manually.
+  i. If the tracker row has a "Contact Email" field: use Gmail MCP (create_draft) to compose a draft FROM harshverdhansoni@gmail.com TO that address. Subject: "Application for <Role> — Harshverdhan Soni". Body: full cover letter text. Attach the tailored resume. DO NOT SEND — draft only. Tell the user "Gmail draft ready for <Company> — check Drafts and send it yourself."
 
-Repeat steps a–h for every approved job before moving to Part B.
+Repeat steps a–i for every approved job before moving to Part B.
 
 ━━━ PART B — SOURCE AND PROCESS NEW ROLES ━━━
 
-1. Sync profile: run scripts/fetch_profile.py to pull the latest cloud profile. Read active_track.json to know which tracker and profile file to use for all steps below.
-2. Source new job listings matching my target titles, locations, and work preferences (web search + job-alert emails).
+1. Sync profile: run scripts/fetch_profile.py. Read active_track.json for tracker and profile file paths.
+2. Source new job listings matching my target titles, locations, and work preferences (web search + job-alert emails). For EVERY role sourced, also extract:
+   - Deadline: the application closing date in YYYY-MM-DD format. Check the JD, career page, and email alert. Leave blank if not found — do NOT guess.
+   - Contact Email: the HR/recruiter email visible on the JD or career page (e.g. apply@, careers@, hr@). Leave blank if not clearly stated — do NOT invent.
 3. Deduplicate — skip any URL or Company+Role already in the tracker.
 4. Score each new role 0–100 against my profile. Mark deal-breakers as Skipped. Leave below-threshold roles as Scored.
 5. Eligibility check — mark Eligible = Yes only when all must-haves from profile.md Section 9 are met.
 6. Tailor resume and cover letter for the top 2 highest-scoring eligible roles. Save to jobs/<Company>_<Role>/.
-7. For each newly tailored role, repeat the browser actions from Part A (open new tab → navigate to official ATS → fill form → stop before Submit → screenshot).
-8. Update the tracker: every row gets status, score, rationale, file names, and today's date.
+7. For each newly tailored role, repeat the browser actions from Part A steps a–i (open new tab → navigate → fill form → stop before Submit → screenshot → Gmail draft if contact email exists).
+8. Update the tracker: every row gets status, score, rationale, deadline, contact email, file names, and today's date.
 9. Run scripts/sync_jobs.py to push tracker to the cloud.
 10. Run scripts/pending_confirmations.py and show its output.
-11. One-time setup: create a scheduled task with ID "sarthitantra-daily-pipeline", cron "0 11 * * *" (11:00 AM daily). Skip this step silently if that task ID already exists.
+11. One-time setup: create a scheduled task with ID "sarthitantra-daily-pipeline", cron "0 11 * * *" (11:00 AM daily). Skip silently if that task ID already exists.
 
 ━━━ FINAL SUMMARY ━━━
 
 Show one consolidated report:
-• Jobs applied for from Part A (with screenshots of each filled form)
-• New roles sourced, scored, and their scores
-• Roles tailored and applied for in Part B (with screenshots)
+• Jobs applied for from Part A (screenshots + Gmail draft status per job)
+• New roles sourced, scored, deadlines, and contact emails found
+• Roles tailored and applied for in Part B (screenshots + Gmail draft status)
 • Roles skipped (deal-breaker or below threshold)
-• All jobs currently waiting for the user to click Submit
+• All jobs currently waiting for the user to click Submit or send the Gmail draft
 
-End with: "All forms are filled and waiting in open browser tabs. Please review each tab and click Submit yourself. Once you've submitted, tell me the Job ID (e.g. 'I submitted JOB-042') and I'll mark it as Submitted in the tracker."
+End with: "All forms are filled and waiting in open browser tabs. Gmail drafts are ready for any roles with a contact email. Please review each tab, click Submit yourself, and send the Gmail drafts from your Drafts folder. Tell me the Job ID once submitted (e.g. 'I submitted JOB-042') and I'll mark it as Submitted."
 
-GUARDRAILS: Never click Submit or Apply. Never enter passwords, OTPs, or government IDs. Never apply to deal-breakers. Never invent experience. Respect the daily cap in profile.md Section 9.`;
+GUARDRAILS: Never click Submit or Apply. Never send emails — drafts only. Never enter passwords, OTPs, or government IDs. Never apply to deal-breakers. Never invent experience. Respect the daily cap in profile.md Section 9.`;
           return (
             <div className="border border-indigo-200 rounded-xl p-4 bg-indigo-50">
               <div className="flex items-center justify-between mb-3">

@@ -194,17 +194,10 @@ export default function Onboarding({ user, onComplete }) {
   const [kitDone, setKitDone] = useState(false);
   const [copied, setCopied] = useState("");
 
-  const configJson = JSON.stringify({
-    supabase_url: SUPABASE_URL,
-    supabase_key: SUPABASE_KEY,
-    user_email: user?.email ?? "",
-    user_id: user?.id ?? "",
-  }, null, 2);
-
-  const copyPrompt = (text) => {
+  const copyPrompt = (key, text) => {
     navigator.clipboard.writeText(text).then(() => {
-      setCopied(text);
-      setTimeout(() => setCopied(""), 2000);
+      setCopied(key);
+      setTimeout(() => setCopied(""), 2500);
     });
   };
 
@@ -213,29 +206,71 @@ export default function Onboarding({ user, onComplete }) {
     try {
       const zip = new JSZip();
 
-      // Fetch static files from public/starter-kit/
-      const [pyRes, instrRes, quickRes] = await Promise.all([
-        fetch("/starter-kit/scripts/fetch_profile.py"),
-        fetch("/starter-kit/folder-instructions.md"),
-        fetch("/starter-kit/QUICK_START.txt"),
-      ]);
-      const [pyText, instrText, quickText] = await Promise.all([
-        pyRes.text(), instrRes.text(), quickRes.text(),
-      ]);
+      // 1. Generate / retrieve a permanent API token from Supabase
+      let apiToken = "";
+      try {
+        const { data: existing } = await supabase
+          .from("user_api_tokens").select("api_token").eq("user_id", user?.id).maybeSingle();
+        if (existing?.api_token) {
+          apiToken = existing.api_token;
+        } else {
+          const { data: inserted } = await supabase
+            .from("user_api_tokens").insert({ user_id: user?.id }).select("api_token").single();
+          apiToken = inserted?.api_token ?? "";
+        }
+      } catch { /* SQL migration not yet run — api_token will be empty; user will see warning */ }
 
-      // Personalised config
-      zip.file("sarthitantra_config.json", configJson);
-      // Scripts
-      zip.folder("scripts").file("fetch_profile.py", pyText);
-      // Instructions
-      zip.file("folder-instructions.md", instrText);
-      // Quick start guide
-      zip.file("QUICK_START.txt", quickText);
-      // Empty placeholder folders
-      zip.folder("master").file(".gitkeep", "");
-      zip.folder("jobs").file(".gitkeep", "");
+      const config = {
+        supabase_url: SUPABASE_URL,
+        supabase_key: SUPABASE_KEY,
+        user_email: user?.email ?? "",
+        user_id:    user?.id   ?? "",
+        api_token:  apiToken,
+      };
 
-      const blob = await zip.generateAsync({ type: "blob" });
+      if (!apiToken) {
+        setError(
+          "⚠️ Config saved without an API token — fetch_profile.py will ask for a password. " +
+          "Fix: run supabase_cli_auth.sql in your Supabase SQL Editor, then click Download again."
+        );
+      }
+
+      zip.file("sarthitantra_config.json", JSON.stringify(config, null, 2));
+
+      // 2. Static files from /starter-kit/ (served from public/)
+      const STATIC = [
+        "folder-instructions.md",
+        "QUICK_START.txt",
+        "applications_tracker.xlsx",
+        "scripts/fetch_profile.py",
+        "scripts/sync_jobs.py",
+        "scripts/apply_approved.py",
+        "scripts/mark_applied.py",
+        "scripts/cancel_application.py",
+        "scripts/delete_job.py",
+        "scripts/pending_confirmations.py",
+        "master/.gitkeep",
+        "jobs/.gitkeep",
+      ];
+      const missing = [];
+      await Promise.all(STATIC.map(async (path) => {
+        try {
+          const res = await fetch(`/starter-kit/${path}`);
+          if (!res.ok) { missing.push(path); return; }
+          if (path.endsWith(".xlsx")) {
+            zip.file(path, await res.arrayBuffer());
+          } else {
+            zip.file(path, await res.text());
+          }
+        } catch { missing.push(path); }
+      }));
+      if (missing.length > 0 && !apiToken) {
+        // already showing api_token warning — don't stack alerts
+      } else if (missing.length > 0) {
+        setError(`⚠️ These files couldn't be fetched: ${missing.join(", ")}. The site may need a redeploy first.`);
+      }
+
+      const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -566,13 +601,20 @@ export default function Onboarding({ user, onComplete }) {
               </div>
               <p>Then extract the ZIP <strong>into that folder</strong>. After extraction you should see:</p>
               <pre className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-700 leading-relaxed">{`Sarthitantra/
-├── sarthitantra_config.json   ← your personal connection file
-├── folder-instructions.md     ← pipeline rules for Cowork
-├── QUICK_START.txt            ← this guide (offline reference)
+├── sarthitantra_config.json        ← your personal connection file
+├── folder-instructions.md          ← pipeline rules for Cowork
+├── applications_tracker.xlsx       ← job application log
+├── QUICK_START.txt                 ← offline reference guide
 ├── scripts/
-│   └── fetch_profile.py       ← profile sync script
-├── master/                    ← your resume downloads here
-└── jobs/                      ← one subfolder per job`}</pre>
+│   ├── fetch_profile.py            ← sync profile from cloud
+│   ├── sync_jobs.py                ← push tracker to cloud
+│   ├── apply_approved.py           ← generate apply queue
+│   ├── mark_applied.py             ← record a submission
+│   ├── cancel_application.py       ← cancel a queued job
+│   ├── delete_job.py               ← remove a job row
+│   └── pending_confirmations.py    ← list jobs awaiting submit
+├── master/                         ← your resume downloads here
+└── jobs/                           ← one subfolder per job`}</pre>
             </div>
           </div>
 
@@ -584,8 +626,8 @@ export default function Onboarding({ user, onComplete }) {
             </div>
             <div className="ml-9 space-y-2 text-xs text-slate-600">
               <p>Open a terminal (Command Prompt on Windows, Terminal on Mac) and run:</p>
-              <pre className="bg-slate-800 text-green-300 px-4 py-2.5 rounded-lg">pip install supabase</pre>
-              <p className="text-slate-400">That's the only external package needed. Python 3.8+ required.</p>
+              <pre className="bg-slate-800 text-green-300 px-4 py-2.5 rounded-lg">pip install supabase openpyxl</pre>
+              <p className="text-slate-400">Those are the only external packages needed. Python 3.8+ required.</p>
             </div>
           </div>
 
@@ -611,22 +653,80 @@ export default function Onboarding({ user, onComplete }) {
 
             {/* Copyable prompts */}
             <div className="ml-9 space-y-2">
-              {[
-                { label: "Quick run", prompt: "Run the full job pipeline." },
-                { label: "Detailed run", prompt: "Sync my profile from Sarthitantra, then source new job roles matching my preferences, score and filter them, tailor my resume for the top matches, pre-fill the application forms in my browser, and show me a summary of everything ready for my approval." },
-              ].map(({ label, prompt }) => (
-                <div key={label} className="bg-white border border-slate-200 rounded-lg p-3 space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
-                  <p className="text-xs text-slate-700 leading-relaxed italic">"{prompt}"</p>
-                  <button
-                    type="button"
-                    onClick={() => copyPrompt(prompt)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition"
-                  >
-                    {copied === prompt ? "✅ Copied!" : "📋 Copy prompt"}
-                  </button>
-                </div>
-              ))}
+              {(() => {
+                const FULL_PROMPT = `Read folder-instructions.md in this folder first, then execute the following steps in order. Do not skip any step.
+
+━━━ PART A — APPLY APPROVED JOBS (do this before anything else) ━━━
+
+Run: python scripts/apply_approved.py
+This outputs a list of jobs the user has already approved for application.
+
+For EACH job in that output, you MUST take these browser actions right now:
+  a. Use your Claude in Chrome browser tools to open a NEW browser tab.
+  b. Navigate to the job's application URL (use the official company ATS page — if the stored URL is an aggregator like LinkedIn or Internshala, first search the web for the company's official careers page and navigate there instead).
+  c. Read the form fields on the page.
+  d. Fill in EVERY visible field using the data from profile.md (name, email, phone, location, LinkedIn, work authorization, notice period, expected CTC, relocation preference, work mode preference, etc.). Use the tailored resume from jobs/<Company>_<Role>/ if it exists; otherwise upload the master resume.
+  e. If the form has any field not covered by profile.md, leave it blank and note it.
+  f. STOP — do not click Submit, Apply, or Send under any circumstances.
+  g. Take a screenshot of the filled form.
+  h. Keep this tab open for the user to review and submit manually.
+  i. If the tracker row has a "Contact Email" field: use Gmail MCP (create_draft) to compose a draft FROM harshverdhansoni@gmail.com TO that address. Subject: "Application for <Role> — Harshverdhan Soni". Body: full cover letter text. Attach the tailored resume. DO NOT SEND — draft only. Tell the user "Gmail draft ready for <Company> — check Drafts and send it yourself."
+
+Repeat steps a–i for every approved job before moving to Part B.
+
+━━━ PART B — SOURCE AND PROCESS NEW ROLES ━━━
+
+1. Sync profile: run scripts/fetch_profile.py. Read active_track.json for tracker and profile file paths.
+2. Source new job listings matching my target titles, locations, and work preferences (web search + job-alert emails). For EVERY role sourced, also extract:
+   - Deadline: the application closing date in YYYY-MM-DD format. Check the JD, career page, and email alert. Leave blank if not found — do NOT guess.
+   - Contact Email: the HR/recruiter email visible on the JD or career page (e.g. apply@, careers@, hr@). Leave blank if not clearly stated — do NOT invent.
+   - Contact Number: any phone number listed on the JD or company careers page. Leave blank if not found.
+3. Deduplicate — skip any URL or Company+Role already in the tracker.
+4. Score each new role 0–100 against my profile. Mark deal-breakers as Skipped. Leave below-threshold roles as Scored.
+5. Eligibility check — mark Eligible = Yes only when all must-haves from profile.md Section 9 are met.
+6. Tailor resume and cover letter for the top 2 highest-scoring eligible roles. Save to jobs/<Company>_<Role>/.
+7. For each newly tailored role, repeat the browser actions from Part A steps a–i (open new tab → navigate → fill form → stop before Submit → screenshot → Gmail draft if contact email exists).
+8. Update the tracker: every row gets status, score, rationale, deadline, contact email, contact number, file names, and today's date.
+9. Run scripts/sync_jobs.py to push tracker to the cloud.
+10. Run scripts/pending_confirmations.py and show its output.
+11. One-time setup: create a scheduled task with ID "sarthitantra-daily-pipeline", cron "0 11 * * *" (11:00 AM daily). Skip silently if that task ID already exists.
+
+━━━ FINAL SUMMARY ━━━
+
+Show one consolidated report:
+• Jobs applied for from Part A (screenshots + Gmail draft status per job)
+• New roles sourced, scored, deadlines, and contact emails found
+• Roles tailored and applied for in Part B (screenshots + Gmail draft status)
+• Roles skipped (deal-breaker or below threshold)
+• All jobs currently waiting for the user to click Submit or send the Gmail draft
+
+End with: "All forms are filled and waiting in open browser tabs. Gmail drafts are ready for any roles with a contact email. Please review each tab, click Submit yourself, and send the Gmail drafts from your Drafts folder. Tell me the Job ID once submitted (e.g. 'I submitted JOB-042') and I'll mark it as Submitted."
+
+GUARDRAILS: Never click Submit or Apply. Never send emails — drafts only. Never enter passwords, OTPs, or government IDs. Never apply to deal-breakers. Never invent experience. Respect the daily cap in profile.md Section 9.`;
+
+                return [
+                  { key: "quick", label: "Quick start", prompt: "Run the full job pipeline." },
+                  { key: "full",  label: "Full pipeline prompt (paste this on first run)", prompt: FULL_PROMPT },
+                ].map(({ key, label, prompt }) => (
+                  <div key={key} className="bg-white border border-slate-200 rounded-lg p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
+                      <button
+                        type="button"
+                        onClick={() => copyPrompt(key, prompt)}
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-md transition ${
+                          copied === key
+                            ? "bg-green-100 text-green-700"
+                            : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                        }`}
+                      >
+                        {copied === key ? "✅ Copied!" : "📋 Copy"}
+                      </button>
+                    </div>
+                    <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap leading-relaxed font-sans max-h-48 overflow-y-auto">{prompt}</pre>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
 

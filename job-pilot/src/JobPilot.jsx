@@ -111,6 +111,21 @@ const statusClass = (s) => {
 
 const isDealBreaker = (l) => String(l.dealBreaker || "").trim().toLowerCase() === "yes";
 
+// Returns urgency metadata for a deadline string (YYYY-MM-DD or similar)
+const deadlineInfo = (deadline) => {
+  if (!deadline) return null;
+  const d = new Date(deadline);
+  if (isNaN(d.getTime())) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((d - today) / 86400000);
+  if (days < 0)  return { days, label: "Expired",        bg: "#f1f5f9", color: "#94a3b8", ring: "#cbd5e1", pulse: false };
+  if (days === 0) return { days, label: "Due today!",     bg: "#fef2f2", color: "#dc2626", ring: "#fca5a5", pulse: true  };
+  if (days <= 3)  return { days, label: `${days}d left`,  bg: "#fef2f2", color: "#dc2626", ring: "#fca5a5", pulse: false };
+  if (days <= 7)  return { days, label: `${days}d left`,  bg: "#fff7ed", color: "#ea580c", ring: "#fdba74", pulse: false };
+  if (days <= 14) return { days, label: `${days}d left`,  bg: "#fefce8", color: "#ca8a04", ring: "#fde047", pulse: false };
+  return           { days, label: `${days}d left`,        bg: "#f0fdf4", color: "#16a34a", ring: "#86efac", pulse: false };
+};
+
 function ChipEditor({ label, items, onChange, placeholder }) {
   const [val, setVal] = useState("");
   const add = () => {
@@ -398,6 +413,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
   const [hideDB, setHideDB] = useState(true);
   const [onlyStar, setOnlyStar] = useState(false);
   const [sortBy, setSortBy] = useState("score");
+  const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState("");
@@ -727,9 +743,11 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
       status:      col("Status") || "Scored",
       dealBreaker: col("Deal-breaker?", "Deal Breaker", "DealBreaker") || "No",
       notes:       col("Notes", "Missing requirements / notes", "Missing Requirements"),
-      resumeFile:  col("Resume file", "Resume File"),
-      coverFile:   col("Cover letter file", "Cover Letter File"),
-      starred:     false,
+      resumeFile:    col("Resume file", "Resume File"),
+      coverFile:     col("Cover letter file", "Cover Letter File"),
+      deadline:      col("Deadline", "Apply By", "Apply before", "Last date", "Application deadline"),
+      contactEmail:  col("Contact Email", "HR Email", "Company Email", "Recruiter Email", "Contact"),
+      starred:       false,
     };
   };
 
@@ -740,7 +758,9 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
     workMode: r.workMode || "", url: r.url || "", score: Number(r.score) || 0,
     rationale: r.rationale || "", status: r.status || "Scored",
     dealBreaker: r.dealBreaker || "No", notes: r.notes || "",
-    resumeFile: r.resumeFile || "", coverFile: r.coverFile || "", starred: !!r.starred,
+    resumeFile: r.resumeFile || "", coverFile: r.coverFile || "",
+    deadline: r.deadline || "", contactEmail: r.contactEmail || "",
+    starred: !!r.starred,
   });
 
   const mergeListings = (incoming) => {
@@ -811,13 +831,43 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
       .filter((l) => statusFilter === "All" || l.status === statusFilter)
       .filter((l) => (onlyStar ? l.starred : true))
       .filter((l) => {
+        if (urgencyFilter === "all") return true;
+        const info = deadlineInfo(l.deadline);
+        if (urgencyFilter === "none") return !info;
+        if (!info) return false;
+        if (urgencyFilter === "expired") return info.days < 0;
+        if (urgencyFilter === "today")   return info.days === 0;
+        if (urgencyFilter === "3d")      return info.days >= 0 && info.days <= 3;
+        if (urgencyFilter === "7d")      return info.days >= 0 && info.days <= 7;
+        if (urgencyFilter === "14d")     return info.days >= 0 && info.days <= 14;
+        return true;
+      })
+      .filter((l) => {
         if (!search) return true;
         const q = search.toLowerCase();
         return (l.company + l.role + l.rationale + l.location).toLowerCase().includes(q);
       });
-    out.sort((a, b) => (sortBy === "score" ? b.score - a.score : String(b.dateSourced).localeCompare(String(a.dateSourced))));
+    if (sortBy === "score") {
+      out.sort((a, b) => b.score - a.score);
+    } else if (sortBy === "date") {
+      out.sort((a, b) => String(b.dateSourced).localeCompare(String(a.dateSourced)));
+    } else if (sortBy === "urgency") {
+      // Bucket: 0 = active deadline (sorted asc by days left), 1 = no deadline, 2 = expired
+      const urgencyKey = (l) => {
+        const info = deadlineInfo(l.deadline);
+        if (!info) return [1, 0];          // no deadline
+        if (info.days < 0) return [2, info.days]; // expired — push to end, most recently expired first
+        return [0, info.days];             // active — fewest days first
+      };
+      out.sort((a, b) => {
+        const [ba, da] = urgencyKey(a);
+        const [bb, db] = urgencyKey(b);
+        if (ba !== bb) return ba - bb;
+        return da - db;
+      });
+    }
     return out;
-  }, [listings, search, minScore, statusFilter, hideDB, onlyStar, sortBy]);
+  }, [listings, search, minScore, statusFilter, hideDB, onlyStar, sortBy, urgencyFilter]);
 
   // Reset to page 1 whenever the filtered set changes
   useEffect(() => { setPage(1); }, [filtered]);
@@ -1265,6 +1315,16 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                 <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
                   <option value="score">Sort: Score</option>
                   <option value="date">Sort: Date</option>
+                  <option value="urgency">Sort: Urgency</option>
+                </select>
+                <select value={urgencyFilter} onChange={(e) => { setUrgencyFilter(e.target.value); setPage(1); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                  <option value="all">⏱ All deadlines</option>
+                  <option value="today">🔴 Due today</option>
+                  <option value="3d">🔴 Critical (≤3 days)</option>
+                  <option value="7d">🟠 Urgent (≤7 days)</option>
+                  <option value="14d">🟡 Due soon (≤14 days)</option>
+                  <option value="none">— No deadline</option>
+                  <option value="expired">✕ Expired</option>
                 </select>
                 <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
                   {[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n} per page</option>)}
@@ -1304,6 +1364,7 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                   const db = isDealBreaker(l);
                   const rec = l.score >= prefs.scoreThreshold && !db;
                   const submitted = l.status === "Submitted";
+                  const dlInfo = deadlineInfo(l.deadline);
                   const rFile = dirHandle ? findJobFile(l, "resume") : null;
                   const cFile = dirHandle ? findJobFile(l, "cover") : null;
                   const jobText = `${l.rationale} ${l.notes}`;
@@ -1325,11 +1386,41 @@ export default function JobPilot({ user, onLogout, isAdmin, onAdmin, activeProfi
                                 <Building2 size={14} /> {l.company}
                                 {l.location && <><span className="text-slate-300">·</span><MapPin size={14} /> {l.location}</>}
                               </p>
+                              {/* Deadline + contact row */}
+                              {(dlInfo || l.contactEmail) && (
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  {dlInfo && (
+                                    <span
+                                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold${dlInfo.pulse ? " animate-pulse" : ""}`}
+                                      style={{ background: dlInfo.bg, color: dlInfo.color, borderColor: dlInfo.ring }}
+                                      title={`Deadline: ${l.deadline}`}
+                                    >
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                      {dlInfo.label}
+                                    </span>
+                                  )}
+                                  {l.contactEmail && (
+                                    <a href={`mailto:${l.contactEmail}`}
+                                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                                      title="Contact email"
+                                    >
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 7 10-7"/></svg>
+                                      {l.contactEmail}
+                                    </a>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <button onClick={() => editListing(l.id, { starred: !l.starred })}>
                               <Star size={20} className={l.starred ? "fill-amber-400 text-amber-400" : "text-slate-300"} />
                             </button>
                           </div>
+                          {dlInfo && dlInfo.days >= 0 && dlInfo.days <= 3 && (
+                            <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold" style={{ background: dlInfo.bg, color: dlInfo.color, border: `1px solid ${dlInfo.ring}` }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                              {dlInfo.days === 0 ? "Deadline is TODAY — apply immediately!" : `Only ${dlInfo.days} day${dlInfo.days > 1 ? "s" : ""} left to apply — act now!`}
+                            </div>
+                          )}
                           {l.rationale && <p className="mt-2 text-sm text-slate-600">{l.rationale}</p>}
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             {submitted && <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700"><CheckCircle2 size={12} /> Submitted</span>}
